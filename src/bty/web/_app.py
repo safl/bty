@@ -1130,35 +1130,24 @@ def create_app(
                 # bytes), and as the catch-all for any catalog row whose
                 # ``resolved_src`` is NULL (legacy schema / failed import).
                 # An https origin is reset back to its direct URL just
-                # below; oras stays on the proxy by design (the live env
-                # can't carry a fresh OCI bearer per fetch).
+                # below; oras stays on the proxy by design when withcache
+                # is cold (the live env curl can't follow oras://).
                 image_url = f"{base}/images/{ref}/{image_name_encoded}"
                 is_oras = src is not None and src.startswith("oras://")
-                if resolved_src is not None:
-                    # New unified path: a canonical plain-HTTPS URL the
-                    # catalog row stored at import time (or the same URL
-                    # as ``src`` for an http(s) entry). Mint a fresh
-                    # OCI bearer for oras-resolved entries so withcache
-                    # 0.4.0+ can forward it into the background fetch
-                    # worker; HTTPS entries probe anonymously.
-                    head_headers: dict[str, str] | None = None
-                    if is_oras:
-                        try:
-                            ref_oras = _oras.parse_ref(str(src))
-                            token = _oras.fetch_anonymous_token(ref_oras.host, ref_oras.repository)
-                            head_headers = {"Authorization": f"Bearer {token}"}
-                        except _oras.OrasError:
-                            head_headers = None
-                    if withcache_url and _withcache.is_cached(
-                        withcache_url, resolved_src, headers=head_headers
-                    ):
-                        image_url = _withcache.blob_url(withcache_url, resolved_src)
+                if src is not None:
+                    # Cache key for withcache is the original catalog src
+                    # (oras:// or https://). Withcache 0.6.0+ is oras-aware
+                    # and mints its own anonymous OCI bearer on a cold
+                    # fetch, so bty doesn't pre-resolve a bearer here.
+                    if withcache_url and _withcache.is_cached(withcache_url, src):
+                        image_url = _withcache.blob_url(withcache_url, src)
                         cache_hit = True
-                    elif not is_oras:
-                        # Cold cache / no cache for an https origin: let the
-                        # live env fetch direct, bty-web is out of the bytes
-                        # path. For oras the default `/images/{ref}` proxy
-                        # stays in place (live env has no bearer).
+                    elif not is_oras and resolved_src is not None:
+                        # Cold cache / no cache for an https origin: let
+                        # the live env fetch direct, bty-web is out of the
+                        # bytes path. For oras the default ``/images/{ref}``
+                        # proxy stays in place (the live env's curl has
+                        # no ``oras://`` scheme handler).
                         image_url = resolved_src
                         cache_hit = False
                     else:
@@ -2198,10 +2187,22 @@ def create_app(
 
         Contract: a catalog manifest carries only REMOTE srcs (the
         receiver can't resolve ``file://`` off the publisher's host).
-        Cached entries are rewritten to ``http://<this-server>/images/...``
-        so they're reachable; dir-scan-only entries (file:// only, no
-        sha + no upstream URL) are skipped. Any entry that would still
-        leak a ``file://`` is dropped defensively below.
+        Locally-cached entries are rewritten to
+        ``http://<this-server>/images/...``; dir-scan-only entries
+        (file:// only, no sha + no upstream URL) are skipped. Any
+        entry that would still leak a ``file://`` is dropped
+        defensively below.
+
+        Withcache rewrite: when a withcache URL is configured the
+        upstream branch rewrites EVERY entry's src (oras + https)
+        to ``<withcache>/b/<b64(origin)>/<basename>``. Withcache
+        0.6.0+ is oras-aware (it parses ``oras://...``, mints its
+        own bearer, fetches from the registry), so the catalog the
+        live env sees is uniform: every remote entry is an HTTPS URL
+        on the LAN cache regardless of original scheme. Cold misses
+        on withcache are absorbed by withcache's own Range-resume
+        + auto-fetch (no bty-side proxy fallback once the catalog
+        commits to withcache as the bytes-source).
 
         Implemented as ``application/toml`` so a curl-then-eyeball
         round-trip shows a human-readable manifest, not a binary blob.
@@ -2211,6 +2212,8 @@ def create_app(
         """
         unified = _list_unified_images()
         origin = _request_origin(request)
+        with _db.open_db(state_path) as conn:
+            withcache_url = _settings_store.resolve_withcache_url(conn)
         lines: list[str] = ["version = 1", ""]
         for u in unified:
             if u.sha256 is None:
@@ -2233,6 +2236,13 @@ def create_app(
                 if upstream is None:
                     continue
                 src = upstream
+                # Withcache canonicalisation: the live env sees the
+                # same HTTPS URL shape (``<withcache>/b/<b64>/<name>``)
+                # regardless of whether the original upstream is oras
+                # or https. Withcache 0.6.0+ handles the OCI dance
+                # internally on a cold miss.
+                if withcache_url:
+                    src = _withcache.blob_url(withcache_url, upstream)
             # Defense-in-depth: a catalog manifest never publishes
             # ``file://`` srcs (see the contract in the docstring).
             # The cached/upstream branches above shouldn't emit one,

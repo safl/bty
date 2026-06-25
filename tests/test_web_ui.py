@@ -2971,17 +2971,15 @@ def test_catalog_entry_check_unreachable_origin_is_not_500(
     assert body["withcache"] == {"configured": False}
 
 
-def test_catalog_entry_check_oras_marks_withcache_not_applicable(
+def test_catalog_entry_check_oras_heads_withcache_even_without_catalog_row(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An oras src with NO matching catalog row (e.g. an operator
-    pasting one into the Check form without adding it first) reports
-    ``applicable: false`` because there's no stored ``resolved_src``
-    canonical URL to warm. Once added via ``POST /catalog/entries``
-    the import-time resolution populates ``resolved_src`` and the
-    next Check warms withcache against that URL (see
-    :func:`test_catalog_entry_check_oras_with_resolved_src_warms_withcache`).
-    """
+    """The Check endpoint HEADs withcache for any oras:// URL, even one
+    that hasn't been added to the catalog yet. Withcache 0.6.0+ is
+    oras-aware so the probe is meaningful: HEAD warms / records the
+    miss on withcache's side. Before withcache learned oras, bty had
+    to gate this probe on a resolved_src column being populated; with
+    OCI handled upstream the gate is gone."""
     from bty import flash as _flash
     from bty.web import _settings_store, _withcache
 
@@ -2989,34 +2987,43 @@ def test_catalog_entry_check_oras_marks_withcache_not_applicable(
         _flash,
         "probe_image_url",
         lambda *_a, **_kw: _flash.ImageInfo(
-            path=None, url="oras://reg/img", format="img.gz", size_bytes=0, virtual_size_bytes=None
+            path=None,
+            url="oras://reg/owner/img:tag",
+            format="img.gz",
+            size_bytes=0,
+            virtual_size_bytes=None,
         ),
     )
     monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
 
-    def fail(*_a, **_kw):  # type: ignore[no-untyped-def]
-        raise AssertionError("is_cached must not be probed when no resolved_src is stored")
+    captured: dict[str, object] = {}
 
-    monkeypatch.setattr(_withcache, "is_cached", fail)
+    def fake_is_cached(withcache_url, origin, **_kw):  # type: ignore[no-untyped-def]
+        captured["origin"] = origin
+        return False
+
+    monkeypatch.setattr(_withcache, "is_cached", fake_is_cached)
 
     r = client.post(
         "/ui/catalog/entries/check",
-        data={"src": "oras://reg/img"},
+        data={"src": "oras://reg/owner/img:tag"},
         cookies=AUTH,
     )
     assert r.status_code == 200, r.text
-    assert r.json()["withcache"] == {"configured": True, "applicable": False}
+    assert r.json()["withcache"] == {"configured": True, "hit": False, "warmed": True}
+    # The HEAD goes against the original oras:// URL; bty no longer
+    # needs to pre-resolve a canonical HTTPS URL.
+    assert captured["origin"] == "oras://reg/owner/img:tag"
 
 
-def test_catalog_entry_check_oras_with_resolved_src_warms_withcache(
+def test_catalog_entry_check_oras_heads_withcache_with_src(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An oras catalog row whose import-time resolution populated
-    ``resolved_src`` warms withcache against that canonical URL, with
-    a fresh OCI bearer minted just-in-time and supplied as the HEAD's
-    ``Authorization`` header. From withcache 0.4.0 the header is
-    forwarded into the background fetch worker so the cache fills on
-    the first probe."""
+    """An oras catalog row's Check button HEADs withcache against the
+    original ``oras://`` URL. Withcache 0.6.0+ is oras-aware: it parses
+    the ref, mints its own anonymous OCI bearer, and warms the cache
+    against the resolved blob on its end. bty no longer pre-mints a
+    bearer or passes resolved_src on this hot path."""
     from withcache import oras as _oras
 
     from bty import flash as _flash
@@ -3045,20 +3052,16 @@ def test_catalog_entry_check_oras_with_resolved_src_warms_withcache(
         ),
     )
 
-    # Stub the OCI anon-token mint so the test doesn't hit ghcr.io.
-    monkeypatch.setattr(_oras, "fetch_anonymous_token", lambda *_a, **_kw: "fresh-bearer")
-
     captured: dict[str, object] = {}
 
-    def fake_is_cached(withcache_url, origin, headers=None, **_kw):  # type: ignore[no-untyped-def]
+    def fake_is_cached(withcache_url, origin, **_kw):  # type: ignore[no-untyped-def]
         captured["withcache_url"] = withcache_url
         captured["origin"] = origin
-        captured["headers"] = headers
-        return False  # cold cache; the HEAD enqueued the auth-bearing fetch
+        return False  # cold; the HEAD enqueues the auto-fetch on withcache's side
 
     monkeypatch.setattr(_withcache, "is_cached", fake_is_cached)
 
-    # Seed the catalog row so the Check button sees the resolved_src.
+    # Seed the catalog row so the Check button sees the persisted entry.
     r = client.post(
         "/catalog/entries",
         json={"image_url": src},
@@ -3070,8 +3073,7 @@ def test_catalog_entry_check_oras_with_resolved_src_warms_withcache(
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["withcache"] == {"configured": True, "hit": False, "warmed": True}
-    # The HEAD went to withcache for the canonical blob URL, with a fresh
-    # bearer on Authorization. Withcache 0.4.0 forwards that into the fetch
-    # worker, so the (cold) auto-fetch will actually pull from ghcr.io.
-    assert captured["origin"] == blob_url
-    assert captured["headers"] == {"Authorization": "Bearer fresh-bearer"}
+    # The HEAD goes to withcache for the original oras:// URL. withcache
+    # 0.6.0+ handles the OCI dance internally (parse_ref + mint + fetch
+    # on cold miss) so bty supplies no Authorization header.
+    assert captured["origin"] == src
