@@ -9,6 +9,26 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.58.3] - 2026-06-25
+
+### Fixed
+
+- **`oras://` flash failed with `curl exited 92` after roughly the
+  same N minutes on every retry.** On bty-usbboot, large
+  `oras://ghcr.io/...` images aborted mid-stream with a
+  `CURLE_HTTP2_STREAM` framing-layer reset. GHCR's blob CDN
+  (`pkg-containers.githubusercontent.com`) RST_STREAMs long-running
+  HTTP/2 blob transfers once the pre-signed redirect URL's TTL
+  expires, and our pipeline streams directly into `dd` with
+  `--retry` deliberately disabled (retrying from byte 0 would
+  corrupt the target), so the stream death was terminal. Forcing
+  HTTP/1.1 on every streaming fetch sidesteps the framing-layer
+  reset; HTTP/2 multiplexing buys nothing for a single large
+  stream-to-dd transfer, so the cost is zero. Local-pre-download
+  isn't an option in the live env (no writable disk, RAM
+  too small for multi-GiB blobs), so HTTP/1.1 is the right
+  trade-off for now. (`src/bty/flash.py:_CURL_BASE`.)
+
 ## [0.58.2] - 2026-06-23
 
 ### Changed
