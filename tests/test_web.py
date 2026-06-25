@@ -901,6 +901,78 @@ def test_pxe_plan_flash_records_origin_when_withcache_misses(
     }
 
 
+def test_catalog_toml_rewrites_srcs_through_withcache_when_configured(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a withcache URL is configured, ``GET /catalog.toml``
+    rewrites EVERY remote entry's ``src`` to
+    ``<withcache>/b/<b64(origin)>/<basename>`` regardless of original
+    scheme. Withcache 0.6.0+ handles OCI / oras internally on a cold
+    miss, so the catalog the live env consumes is scheme-uniform."""
+    import base64
+
+    from bty.web import _settings_store
+
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+
+    # Use the JSON catalog-add API to seed two entries: one https,
+    # one oras. The endpoint validates the URLs + resolves digests
+    # (mocked); we then read /catalog.toml back and assert the
+    # rewrite.
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: "f" * 64)
+
+    # Bypass the oras resolve dance with a static stub.
+    from withcache import oras as _oras
+
+    monkeypatch.setattr(
+        _oras,
+        "resolve_ref",
+        lambda *_a, **_kw: _oras.ResolvedBlob(
+            blob_url="https://ghcr.io/v2/owner/repo/blobs/sha256:dead",
+            headers={"Authorization": "Bearer x"},
+            digest="sha256:" + "d" * 64,
+            size=1024,
+            title="demo.img.gz",
+        ),
+    )
+
+    https_src = "https://example.invalid/demo.img.gz"
+    oras_src = "oras://ghcr.io/owner/repo:tag"
+    # The /catalog.toml manifest schema requires sha256, so the https
+    # entry needs a sha_url to populate it (oras gets a digest from
+    # the manifest dance).
+    r = app_client.post(
+        "/catalog/entries",
+        json={"image_url": https_src, "sha_url": https_src + ".sha256"},
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    r = app_client.post("/catalog/entries", json={"image_url": oras_src}, cookies=AUTH)
+    assert r.status_code == 201, r.text
+
+    # Sanity: both entries should be present before the rewrite check
+    # (a silent dedup at the listing layer would mask a real bug).
+    entries = app_client.get("/catalog/entries", cookies=AUTH).json()
+    seen_src = {e["src"] for e in entries}
+    assert {https_src, oras_src}.issubset(seen_src), seen_src
+
+    body = app_client.get("/catalog.toml").content.decode()
+
+    def _b64(origin: str) -> str:
+        return base64.urlsafe_b64encode(origin.encode()).decode().rstrip("=")
+
+    # Both originals must be REWRITTEN -- never appear verbatim.
+    assert https_src not in body, "https src must be rewritten through withcache"
+    assert oras_src not in body, "oras src must be rewritten through withcache"
+    # Both must appear under the withcache prefix with the right b64 token.
+    assert f"http://cache.invalid:3000/b/{_b64(https_src)}/" in body
+    assert f"http://cache.invalid:3000/b/{_b64(oras_src)}/" in body
+
+
 def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
     app_client: TestClient,
 ) -> None:
