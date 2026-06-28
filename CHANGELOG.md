@@ -9,6 +9,39 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.61.0] - 2026-06-28
+
+### Added
+
+- **Netboot auto-flash reports failures to the bty-server.** When an
+  unattended (netboot) flash fails for a reason the live env detects --
+  the target disk isn't present, the plan is rejected, or the
+  write/verify didn't complete -- the machine's timeline now shows a
+  `machine.flash_failed` event with the reason, instead of the box
+  sitting at "awaiting flash" forever. The signal only fires when the
+  live env is "capable" (has the `mac` + server URL of a netboot run);
+  USB/interactive runs are unaffected.
+
+### Changed
+
+- **The flash-completion signal is now a single `POST /pxe/{mac}/status`
+  endpoint** carrying `{"status": "done" | "failed", "reason": "..."}`,
+  replacing `POST /pxe/{mac}/done`. One endpoint reports either outcome
+  (and leaves room for more), the live env posts `done` on success and
+  `failed` (with a reason) otherwise. **Breaking:** `/pxe/{mac}/done` is
+  removed; a live env and bty-server must be deployed from the same
+  version.
+
+### Fixed
+
+- **Netboot now uses a warm withcache even when a catalog entry's
+  `resolved_src` is unset.** The PXE flash plan gated its withcache
+  lookup on `resolved_src` being populated, but the lookup keys on
+  `src` alone, so an entry whose import left `resolved_src` NULL was
+  streamed from origin even when the cache held the bytes (while the UI
+  reported it cached). The plan now resolves the cache URL the same way
+  the warm path does.
+
 ## [0.60.0] - 2026-06-25
 
 ### Removed

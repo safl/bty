@@ -1147,7 +1147,7 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
     before = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
     assert before["last_flashed_at"] is None
 
-    r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/done")
+    r = app_client.post("/pxe/aa:bb:cc:dd:ee:ff/status", json={"status": "done"})
     assert r.status_code == 204
 
     after = app_client.get("/machines/aa:bb:cc:dd:ee:ff", cookies=AUTH).json()
@@ -1158,7 +1158,7 @@ def test_pxe_done_updates_last_flashed_at(app_client: TestClient) -> None:
 
 
 def test_pxe_done_404_for_unknown_mac(app_client: TestClient) -> None:
-    r = app_client.post("/pxe/00:11:22:33:44:55/done")
+    r = app_client.post("/pxe/00:11:22:33:44:55/status", json={"status": "done"})
     assert r.status_code == 404
 
 
@@ -1169,7 +1169,7 @@ def test_pxe_done_404_logs_orphan_event(app_client: TestClient) -> None:
     "a box tried to report flash completion for an unknown MAC".
     Without the event the anomaly was silent."""
     mac = "00:11:22:33:44:65"
-    r = app_client.post(f"/pxe/{mac}/done")
+    r = app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
     assert r.status_code == 404
     events = app_client.get(
         "/events",
@@ -1178,6 +1178,68 @@ def test_pxe_done_404_logs_orphan_event(app_client: TestClient) -> None:
     ).json()["events"]
     assert len(events) == 1
     assert events[0]["details"]["signal"] == "done"
+
+
+def test_pxe_status_failed_logs_flash_failed_event_with_reason(app_client: TestClient) -> None:
+    """POST /pxe/{mac}/status with status=failed records a
+    ``machine.flash_failed`` event (with the reason) and touches last_seen,
+    but never sets last_flashed_at -- so the timeline shows the failure
+    instead of the box sitting forever at 'awaiting flash'."""
+    mac = "aa:bb:cc:dd:ee:f1"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_mode": "bty-flash-always",
+        },
+        cookies=AUTH,
+    )
+    r = app_client.post(
+        f"/pxe/{mac}/status",
+        json={"status": "failed", "reason": "write or verify failed"},
+    )
+    assert r.status_code == 204
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "machine.flash_failed"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["details"]["reason"] == "write or verify failed"
+    # A failure must NOT look like a completed flash.
+    after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
+    assert after["last_flashed_at"] is None
+    assert after["boot_mode"] == "bty-flash-always"
+
+
+def test_pxe_status_failed_404_logs_orphan_event(app_client: TestClient) -> None:
+    """status=failed for an unknown MAC 404s and lands a
+    ``pxe.client.orphan`` event tagged ``signal=failed``."""
+    mac = "00:11:22:33:44:75"
+    r = app_client.post(f"/pxe/{mac}/status", json={"status": "failed", "reason": "x"})
+    assert r.status_code == 404
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "pxe.client.orphan"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["details"]["signal"] == "failed"
+
+
+def test_pxe_status_rejects_unknown_status(app_client: TestClient) -> None:
+    """The body's ``status`` is constrained to done|failed; anything else
+    is a 422 (pydantic), so a typo'd client can't silently no-op."""
+    mac = "aa:bb:cc:dd:ee:f2"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "boot_mode": "bty-flash-always",
+        },
+        cookies=AUTH,
+    )
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "bogus"}).status_code == 422
 
 
 def test_pxe_done_touches_last_seen_at(app_client: TestClient) -> None:
@@ -1203,7 +1265,7 @@ def test_pxe_done_touches_last_seen_at(app_client: TestClient) -> None:
     import time
 
     time.sleep(0.01)
-    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "done"}).status_code == 204
     after = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert after["last_seen_at"] > last_seen_t0
 
@@ -1247,7 +1309,7 @@ def test_pxe_done_records_flash_without_mutating_mode(app_client: TestClient) ->
     assert before["boot_mode"] == "bty-flash-once"
     assert before["last_flashed_at"] is None
 
-    r = app_client.post("/pxe/22:33:44:55:66:77/done")
+    r = app_client.post("/pxe/22:33:44:55:66:77/status", json={"status": "done"})
     assert r.status_code == 204
 
     after = app_client.get("/machines/22:33:44:55:66:77", cookies=AUTH).json()
@@ -1314,9 +1376,9 @@ def test_pxe_done_flash_once_second_call_is_idempotent(
         },
         cookies=AUTH,
     )
-    r1 = app_client.post("/pxe/33:44:55:66:77:88/done")
+    r1 = app_client.post("/pxe/33:44:55:66:77:88/status", json={"status": "done"})
     assert r1.status_code == 204
-    r2 = app_client.post("/pxe/33:44:55:66:77:88/done")
+    r2 = app_client.post("/pxe/33:44:55:66:77:88/status", json={"status": "done"})
     assert r2.status_code == 204
     after = app_client.get("/machines/33:44:55:66:77:88", cookies=AUTH).json()
     # Mode stays put across both calls -- no mutation to sanboot.
@@ -1769,7 +1831,7 @@ def test_upsert_clears_completion_signals_on_boot_mode_change(
     )
     app_client.get(f"/pxe/{mac}")  # discovery
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
-    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "done"}).status_code == 204
     # Confirm completion signal landed.
     before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert before["last_flashed_at"] is not None
@@ -1809,7 +1871,7 @@ def test_upsert_clears_completion_signals_on_target_disk_change(
     )
     app_client.get(f"/pxe/{mac}")
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
-    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "done"}).status_code == 204
     before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     assert before["last_flashed_at"] is not None
     # Same mode, but operator picked a new target disk.
@@ -1847,7 +1909,7 @@ def test_upsert_preserves_completion_signals_on_cosmetic_change(
     )
     app_client.get(f"/pxe/{mac}")
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
-    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "done"}).status_code == 204
     before = app_client.get(f"/machines/{mac}", cookies=AUTH).json()
     last_flashed_t0 = before["last_flashed_at"]
     assert last_flashed_t0 is not None
@@ -2594,7 +2656,7 @@ def test_events_list_includes_machine_lifecycle(app_client: TestClient) -> None:
         cookies=AUTH,
     )
     # PXE-done signal -> machine.flashed
-    app_client.post(f"/pxe/{mac}/done")
+    app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
 
     r = app_client.get("/events", cookies=AUTH)
     assert r.status_code == 200
@@ -3370,7 +3432,7 @@ def test_reflash_lifecycle_bty_flash_always_alternates(
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
     assert _saw_flasher_bit(app_client, mac) == 1
     # Live env actually completed -> /pxe/{mac}/done POST.
-    app_client.post(f"/pxe/{mac}/done")
+    app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
 
     # Iter 2: PXE -> sanboot the just-flashed disk; bit cleared.
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
@@ -3416,7 +3478,7 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
     # Live env arms the bit AND completes (/done).
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
     assert _saw_flasher_bit(app_client, mac) == 1
-    app_client.post(f"/pxe/{mac}/done")
+    app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
 
     # Iter 2: sanboot, bit KEPT (this is the terminal contract --
     # was broken pre-v0.30.2: the code cleared the bit for both
@@ -3483,7 +3545,7 @@ def test_reflash_lifecycle_crashed_flasher_retries_chain(
 
     # Now the (retry) live env succeeds + posts /done.
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
-    app_client.post(f"/pxe/{mac}/done")
+    app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
 
     # Iter 3: NOW the sanboot consume fires (armed + last_flashed_at).
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
@@ -3531,7 +3593,7 @@ def test_pxe_done_does_not_mutate_boot_mode(
     mac = "aa:bb:cc:dd:ee:a3"
     _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-once", monkeypatch=monkeypatch)
 
-    r = app_client.post(f"/pxe/{mac}/done")
+    r = app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
     assert r.status_code == 204
 
     # Mode unchanged.
@@ -3746,12 +3808,14 @@ def test_reflash_lifecycle_pxe_offered_event_per_iteration(
     # Cycle 1: flash, arm, /done, sanboot.
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # flash
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
-    app_client.post(f"/pxe/{mac}/done")  # v0.33.24+: required to graduate to sanboot
+    app_client.post(
+        f"/pxe/{mac}/status", json={"status": "done"}
+    )  # v0.33.24+: required to graduate to sanboot
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # sanboot + clear
     # Cycle 2: flash, arm, /done, sanboot.
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # flash (bit=0)
     app_client.get(f"/boot/{ARTIFACT_NAMES[0]}?mac={mac}", headers={"Host": "bty.local:8080"})
-    app_client.post(f"/pxe/{mac}/done")
+    app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})  # sanboot + clear
 
     r = app_client.get(

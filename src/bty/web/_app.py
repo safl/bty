@@ -896,39 +896,61 @@ def create_app(
         return rendered
 
     @app.post(
-        "/pxe/{mac}/done",
+        "/pxe/{mac}/status",
         status_code=status.HTTP_204_NO_CONTENT,
     )
-    def pxe_done(mac: str, request: Request) -> Response:
-        # Open route: the live env hits this from the PXE-booted target,
-        # which has no token. Trust model: bty-web is for trusted
-        # networks (homelab / CI), not the open internet - same as the
-        # other ``/pxe/*`` endpoints.
+    def pxe_status(mac: str, body: _models.PxeStatus, request: Request) -> Response:
+        # Terminal flash signal from the live env; ``status`` in the body
+        # picks the outcome. Open route: the live env hits this from the
+        # PXE-booted target, which has no token. Trust model: bty-web is for
+        # trusted networks (homelab / CI), not the open internet -- same as
+        # the other ``/pxe/*`` endpoints.
         #
-        # Records ``last_flashed_at`` + ``updated_at``. It does NOT mutate
-        # ``boot_mode``: the mode is the operator's intent and stays put.
-        # The post-flash "boot the disk" behaviour comes from the
-        # ``saw_flasher_boot`` bit instead -- armed when the box fetched
-        # the flasher's /boot artifacts, it makes the next /pxe contact
-        # sanboot the freshly-flashed disk. For bty-flash-once that's
-        # terminal (the bit stays set, so it keeps booting the disk); for
-        # bty-flash-always the /pxe handler clears it to re-arm the next
-        # reflash. This is the mode/state split: mode = intent (here),
-        # state = the bit. (Pre-mode/state, this flipped flash-once ->
-        # sanboot, which lied about the operator's configured mode.)
+        #   done   -> records last_flashed_at + a machine.flashed event. It
+        #             does NOT mutate boot_mode (the mode is the operator's
+        #             intent and stays put); the post-flash "boot the disk"
+        #             behaviour comes from the saw_flasher_boot bit instead,
+        #             armed when the box fetched the flasher's /boot
+        #             artifacts. For bty-flash-once that bit is terminal; for
+        #             bty-flash-always the /pxe handler clears it to re-arm.
+        #   failed -> records a machine.flash_failed event carrying ``reason``
+        #             and leaves last_flashed_at untouched, so the machine
+        #             shows the failure instead of sitting at "awaiting flash"
+        #             forever while the live env has already given up.
+        #
+        # Either way last_seen is refreshed (the POST is a live-env heartbeat).
         normalised = _normalise_mac(mac)
         now = _now_iso()
         client_ip = _client_ip(request)
+        failed = body.status == "failed"
+        reason = body.reason.strip()[:500]
         with _db.open_db(state_path) as conn:
-            # last_seen_at + last_seen_ip touched alongside the
-            # completion signal so /ui/machines reflects the most
-            # recent contact (the /done POST IS a live-env heartbeat).
-            cur = conn.execute(
-                "UPDATE machines SET last_flashed_at = ?, "
-                "last_seen_at = ?, last_seen_ip = ?, updated_at = ? WHERE mac = ?",
-                (now, now, client_ip, now, normalised),
-            )
-            if cur.rowcount > 0:
+            if failed:
+                cur = conn.execute(
+                    "UPDATE machines SET last_seen_at = ?, last_seen_ip = ?, "
+                    "updated_at = ? WHERE mac = ?",
+                    (now, client_ip, now, normalised),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE machines SET last_flashed_at = ?, last_seen_at = ?, "
+                    "last_seen_ip = ?, updated_at = ? WHERE mac = ?",
+                    (now, now, client_ip, now, normalised),
+                )
+            if cur.rowcount > 0 and failed:
+                _log_event(
+                    conn,
+                    kind="machine.flash_failed",
+                    summary=(
+                        f"{normalised} reported flash failure" + (f": {reason}" if reason else "")
+                    ),
+                    subject_kind="machine",
+                    subject_id=normalised,
+                    actor="pxe-client",
+                    source_ip=client_ip,
+                    details={"reason": reason} if reason else None,
+                )
+            elif cur.rowcount > 0:
                 _log_event(
                     conn,
                     kind="machine.flashed",
@@ -939,24 +961,23 @@ def create_app(
                     source_ip=client_ip,
                 )
             else:
-                # Surface the orphan to /ui/events so the operator
-                # can see "a live env reported /done for a MAC we
-                # don't know about". Three plausible causes:
-                # operator deleted the machine mid-cycle, the live
-                # env is from a foreign bty-web, or someone is
-                # poking the endpoint directly.
+                # Surface the orphan to /ui/events: a live env reported a
+                # terminal status for a MAC we have no row for (operator
+                # deleted mid-cycle, a foreign bty-web, or someone poking the
+                # endpoint directly).
                 _log_event(
                     conn,
                     kind="pxe.client.orphan",
                     summary=(
-                        f"{normalised} POSTed /done but no machine record exists "
-                        f"(operator deleted mid-cycle, or MAC mismatch from a foreign live env)"
+                        f"{normalised} POSTed /status ({body.status}) but no machine "
+                        f"record exists (operator deleted mid-cycle, or MAC mismatch "
+                        f"from a foreign live env)"
                     ),
                     subject_kind="machine",
                     subject_id=normalised,
                     actor="pxe-client",
                     source_ip=client_ip,
-                    details={"signal": "done"},
+                    details={"signal": body.status},
                 )
             conn.commit()
         if cur.rowcount == 0:
