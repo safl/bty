@@ -508,7 +508,7 @@ def test_e2e_flash_always_alternates_flash_then_sanboot(app_client: TestClient) 
     # 2a. Flasher completes -> /pxe/{mac}/done. Required (v0.33.24+) for
     # the sanboot consume to fire; armed-without-/done re-serves the
     # flash chain.
-    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "done"}).status_code == 204
 
     # 3. Post-flash contact: one-shot sanboot of the just-flashed disk.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -576,7 +576,7 @@ def test_e2e_flash_once_terminates_after_first_flash(app_client: TestClient) -> 
     assert a.status_code == 200, a.text
     # 2a. Flasher completes -> /pxe/{mac}/done (v0.33.24+ requirement
     # for the sanboot consume; armed-without-/done re-serves the chain).
-    assert app_client.post(f"/pxe/{mac}/done").status_code == 204
+    assert app_client.post(f"/pxe/{mac}/status", json={"status": "done"}).status_code == 204
 
     # 3. Post-flash contact: sanboot the just-flashed disk.
     body = app_client.get(f"/pxe/{mac}", headers=host).text
@@ -936,7 +936,7 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
     # Trigger the done call (open endpoint -- PXE clients have
     # no auth). Server-side state mutation only. Endpoint returns
     # 204 No Content on success (no body to return).
-    r = app_client.post("/pxe/12:34:56:78:9a:bc/done")
+    r = app_client.post("/pxe/12:34:56:78:9a:bc/status", json={"status": "done"})
     assert r.status_code in (200, 204), r.text
 
     # Verify last_flashed_at populated; boot_mode is NOT mutated
@@ -1114,7 +1114,7 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     # Done records the flash but does NOT mutate the mode -- flash-once
     # stays flash-once (the saw_flasher_boot bit handles the post-flash
     # disk boot, not a policy mutation).
-    r = app_client.post(f"/pxe/{mac}/done")
+    r = app_client.post(f"/pxe/{mac}/status", json={"status": "done"})
     assert r.status_code in (200, 204), r.text
     r = app_client.get(f"/machines/{mac}", cookies=AUTH)
     assert r.json()["boot_mode"] == "bty-flash-once"

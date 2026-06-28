@@ -94,6 +94,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "machine.upserted",
     "machine.deleted",
     "machine.flashed",
+    "machine.flash_failed",
     "machine.inventory",
     "netboot.pxe.offered",
     "netboot.pxe.plan",

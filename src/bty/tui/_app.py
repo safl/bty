@@ -35,15 +35,15 @@ Catalog sources (same as the old Textual UI):
     or oras://).
 
 PXE-interactive use: ``--catalog http://bty-server:8080/catalog.toml``
-plus ``--mac <MAC>`` so the TUI POSTs ``/pxe/<mac>/done`` after a
-successful flash (derived from the catalog URL's scheme+host).
+plus ``--mac <MAC>`` so the TUI POSTs ``/pxe/<mac>/status`` after a
+flash (derived from the catalog URL's scheme+host).
 
 Public surface preserved from the prior Textual implementation:
 
   * ``BtyTui`` class with ``run()``.
   * ``_TuiImage`` dataclass (catalog row shape).
   * ``load_catalog_from_source(...)``,
-    ``post_pxe_done(...)``, ``post_inventory(...)`` helpers.
+    ``post_pxe_status(...)``, ``post_inventory(...)`` helpers.
   * ``_format_mib``, ``_parse_size_to_bytes`` formatters.
   * ``_WizardStage`` enum.
 
@@ -238,13 +238,31 @@ def load_catalog_from_source(source: str, *, timeout: float = 30.0) -> list[_Tui
     ]
 
 
-def post_pxe_done(pxe_done_base: str, mac: str, *, timeout: float = 10.0) -> None:
-    """POST ``<pxe_done_base>/pxe/{mac}/done``. Silent on success;
-    raises ``urllib.error.URLError`` on transport failure (caller
-    decides whether to surface).
+def post_pxe_status(
+    pxe_done_base: str, mac: str, status: str, reason: str = "", *, timeout: float = 10.0
+) -> None:
+    """POST ``<base>/pxe/{mac}/status`` with ``{"status": ..., "reason": ...}``
+    -- the live env's terminal flash signal.
+
+    ``status`` is ``"done"`` or ``"failed"``; ``reason`` (optional, capped)
+    rides only with a failure so the bty-server can show it on the machine's
+    timeline instead of the box sitting at "awaiting flash" forever. Silent
+    on success; raises ``urllib.error.URLError`` on transport failure (callers
+    decide whether to surface, the failure paths wrap in
+    ``contextlib.suppress``).
     """
     base = pxe_done_base.rstrip("/")
-    req = urllib.request.Request(f"{base}/pxe/{mac}/done", method="POST")
+    payload: dict[str, str] = {"status": status}
+    reason = reason.strip()
+    if reason:
+        payload["reason"] = reason[:500]
+    data = _json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/pxe/{mac}/status",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
     with urllib.request.urlopen(req, timeout=timeout):
         pass
 
@@ -767,6 +785,22 @@ class BtyTui:
         self._catalog_load_error = f"unknown plan mode {mode!r}; falling back to interactive"
         return "interactive"
 
+    def _post_auto_failure(self, reason: str) -> None:
+        """Tell the bty-server an unattended (netboot) flash failed.
+
+        "When it knows and it is capable": the failure paths below call this
+        the moment they detect a non-recoverable failure, and ``mac`` +
+        ``pxe_done_base`` (the netboot context) being set IS the capability
+        check -- a USB/interactive run has neither and stays silent. Without
+        this the server sits at "awaiting flash" forever even though the live
+        env knew. Best-effort: a server we cannot reach must not mask the
+        on-console failure (the red Panel was already printed).
+        """
+        if not (self._state.pxe_done_base and self._state.mac):
+            return
+        with contextlib.suppress(urllib.error.URLError, OSError, TimeoutError):
+            post_pxe_status(self._state.pxe_done_base, self._state.mac, "failed", reason)
+
     def _run_auto(self) -> int:
         """Scripted flash path: plan-driven, no prompts.
 
@@ -834,6 +868,7 @@ class BtyTui:
                     title="Disk inventory failed",
                 )
             )
+            self._post_auto_failure(f"disk inventory failed: {exc}")
             return 1
         matched: dict[str, Any] | None = None
         for disk in all_disks:
@@ -869,6 +904,9 @@ class BtyTui:
                     title="No matching disk",
                 )
             )
+            self._post_auto_failure(
+                f"target disk serial {target_serial!r} not present on this host"
+            )
             return 2
         self._state.selected_disk = matched
 
@@ -888,10 +926,12 @@ class BtyTui:
                     title="Plan rejected",
                 )
             )
+            self._post_auto_failure(f"plan rejected on probe: {plan_or_error}")
             return 3
         plan, errors = plan_or_error
         if errors:
             self._print_flash_plan(plan, errors)
+            self._post_auto_failure("plan validation failed: " + "; ".join(errors))
             return 4
 
         # Run the flash with the same Rich progress bar interactive
@@ -899,12 +939,13 @@ class BtyTui:
         # ``self._state.post_flash`` on success.
         self._screen_flash_running(plan)
         if not self._state.post_flash:
+            self._post_auto_failure("flash did not complete (write or verify failed)")
             return 5
 
         # Best-effort completion signal (bty-web's per-MAC timeline).
         if self._state.pxe_done_base and self._state.mac:
             with contextlib.suppress(urllib.error.URLError, OSError, TimeoutError):
-                post_pxe_done(self._state.pxe_done_base, self._state.mac)
+                post_pxe_status(self._state.pxe_done_base, self._state.mac, "done")
 
         # Stable serial-console marker for the PXE chain test
         # (cijoe/configs/test-pxe.toml chain_markers). Rich Panels
@@ -1963,7 +2004,7 @@ class BtyTui:
         if self._state.pxe_done_base is None or self._state.mac is None:
             return
         try:
-            post_pxe_done(self._state.pxe_done_base, self._state.mac)
+            post_pxe_status(self._state.pxe_done_base, self._state.mac, "done")
         except urllib.error.URLError as exc:
             self._console.print(
                 f"[{_DANGER}]post-flash signal failed:[/] {exc} "
@@ -2163,5 +2204,5 @@ __all__ = [
     "_parse_size_to_bytes",
     "load_catalog_from_source",
     "post_inventory",
-    "post_pxe_done",
+    "post_pxe_status",
 ]

@@ -22,6 +22,7 @@ their own coverage).
 
 from __future__ import annotations
 
+import json as _json
 import urllib.error
 from pathlib import Path
 from typing import Any
@@ -155,9 +156,8 @@ def test_load_catalog_from_source_propagates_url_errors(
         tui_app.load_catalog_from_source("http://server/catalog.toml")
 
 
-def test_post_pxe_done_sends_post(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``post_pxe_done`` issues a POST against ``<server>/pxe/<mac>/done``."""
-    seen: dict[str, str] = {}
+def _capture_request(seen: dict[str, Any]) -> Any:
+    """A urlopen replacement that records url/method/headers/json body."""
 
     class _FakeOpen:
         def __enter__(self) -> _FakeOpen:
@@ -169,45 +169,61 @@ def test_post_pxe_done_sends_post(monkeypatch: pytest.MonkeyPatch) -> None:
     def _capture(req: Any, **_kw: object) -> _FakeOpen:
         seen["url"] = req.full_url
         seen["method"] = req.get_method()
+        seen["content_type"] = req.get_header("Content-type")
+        seen["body"] = _json.loads(req.data) if req.data else None
         return _FakeOpen()
 
-    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture)
+    return _capture
 
-    tui_app.post_pxe_done("http://server:8080", "aa:bb:cc:dd:ee:ff")
 
-    assert seen["url"] == "http://server:8080/pxe/aa:bb:cc:dd:ee:ff/done"
+def test_post_pxe_status_done_sends_json_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``post_pxe_status`` POSTs ``<server>/pxe/<mac>/status`` with a JSON
+    ``{"status": "done"}`` body (no reason on success)."""
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture_request(seen))
+
+    tui_app.post_pxe_status("http://server:8080", "aa:bb:cc:dd:ee:ff", "done")
+
+    assert seen["url"] == "http://server:8080/pxe/aa:bb:cc:dd:ee:ff/status"
     assert seen["method"] == "POST"
+    assert seen["content_type"] == "application/json"
+    assert seen["body"] == {"status": "done"}
 
 
-def test_post_pxe_done_strips_trailing_slash_from_server_url(
+def test_post_pxe_status_strips_trailing_slash_from_server_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen: dict[str, str] = {}
-
-    class _FakeOpen:
-        def __enter__(self) -> _FakeOpen:
-            return self
-
-        def __exit__(self, *_a: object) -> None:
-            pass
-
-    def _capture(req: Any, **_kw: object) -> _FakeOpen:
-        seen["url"] = req.full_url
-        return _FakeOpen()
-
-    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture)
-    tui_app.post_pxe_done("http://server:8080/", "aa:bb:cc:dd:ee:ff")
-    assert seen["url"] == "http://server:8080/pxe/aa:bb:cc:dd:ee:ff/done"
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture_request(seen))
+    tui_app.post_pxe_status("http://server:8080/", "aa:bb:cc:dd:ee:ff", "done")
+    assert seen["url"] == "http://server:8080/pxe/aa:bb:cc:dd:ee:ff/status"
 
 
-def test_post_pxe_done_propagates_url_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_post_pxe_status_failed_includes_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failure carries the reason in the body so the server can surface it."""
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture_request(seen))
+    tui_app.post_pxe_status(
+        "http://server:8080", "aa:bb:cc:dd:ee:ff", "failed", "write or verify failed"
+    )
+    assert seen["body"] == {"status": "failed", "reason": "write or verify failed"}
+
+
+def test_post_pxe_status_omits_reason_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(tui_app.urllib.request, "urlopen", _capture_request(seen))
+    tui_app.post_pxe_status("http://server:8080", "aa:bb:cc:dd:ee:ff", "failed", "")
+    assert seen["body"] == {"status": "failed"}
+
+
+def test_post_pxe_status_propagates_url_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: object, **_kw: object) -> None:
         raise urllib.error.URLError("server gone")
 
     monkeypatch.setattr(tui_app.urllib.request, "urlopen", _boom)
 
     with pytest.raises(urllib.error.URLError):
-        tui_app.post_pxe_done("http://server", "aa:bb:cc:dd:ee:ff")
+        tui_app.post_pxe_status("http://server", "aa:bb:cc:dd:ee:ff", "done")
 
 
 def test_post_inventory_sends_json_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -961,10 +977,10 @@ def test_screen_flash_running_drives_callback_and_sets_post_flash(
             progress(tui_app.flash.FlashProgress(event="done"))
 
     monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute)
-    # Stub post_pxe_done so the test doesn't try to reach the network.
+    # Stub post_pxe_status so the test doesn't try to reach the network.
     monkeypatch.setattr(
         tui_app,
-        "post_pxe_done",
+        "post_pxe_status",
         lambda *_a, **_kw: None,
     )
 
@@ -1012,7 +1028,7 @@ def test_screen_flash_running_does_not_advance_on_failure(
         raise tui_app.flash.FlashError("simulated dd failure")
 
     monkeypatch.setattr(tui_app.flash, "execute_plan", _fake_execute)
-    monkeypatch.setattr(tui_app, "post_pxe_done", lambda *_a, **_kw: None)
+    monkeypatch.setattr(tui_app, "post_pxe_status", lambda *_a, **_kw: None)
 
     monkeypatch.setenv("BTY_IMAGE_ROOT", str(tmp_path))
     app = tui_app.BtyTui()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -314,6 +314,21 @@ class ReleaseFetchRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
     tag: str = Field(default="latest", min_length=1, pattern=r"^[A-Za-z0-9._-]+$")
+
+
+class PxeStatus(BaseModel):
+    """``POST /pxe/{mac}/status`` body: the live env's terminal flash
+    signal. ``status="done"`` records a successful flash (last_flashed_at +
+    a ``machine.flashed`` event); ``status="failed"`` records a failure with
+    an optional ``reason`` (a ``machine.flash_failed`` event) so the operator
+    sees it on the timeline instead of the box sitting at "awaiting flash".
+    One endpoint, the body picks the outcome.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    status: Literal["done", "failed"]
+    reason: str = Field(default="", max_length=500)
 
 
 class BackupEnqueueRequest(BaseModel):
