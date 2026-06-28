@@ -1105,9 +1105,16 @@ def create_app(
                 # imported without a known sha -> omitted below so the
                 # live env flashes without verifying.
                 disk_image_sha = str(_b["disk_image_sha"]) if _b and _b["disk_image_sha"] else None
+                # withcache's lookup keys on ``src`` only (is_cached / blob_url
+                # both take ``src``, never ``resolved_src``), so do NOT gate it
+                # on resolved_src being populated -- that wrongly forced entries
+                # whose import left resolved_src NULL to origin even when the
+                # cache was warm. Match the UI/warm path (``_ui.py``), which
+                # resolves the cache URL from ``conn`` alone. ``resolved_src``
+                # stays purely the non-withcache fallback below.
                 withcache_url = (
                     _settings_store.resolve_withcache_url(conn)
-                    if image_name is not None and target_disk_serial and resolved_src
+                    if image_name is not None and target_disk_serial
                     else None
                 )
             if image_name is not None and target_disk_serial:

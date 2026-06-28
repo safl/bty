@@ -901,6 +901,73 @@ def test_pxe_plan_flash_records_origin_when_withcache_misses(
     }
 
 
+def test_pxe_plan_flash_uses_warm_withcache_even_when_resolved_src_null(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Netboot must consult a warm withcache for an entry whose import left
+    ``resolved_src`` NULL. The plan's cache lookup keys on ``src`` only, so
+    gating it on resolved_src (which it never uses) wrongly forced such
+    entries to origin even when the cache held the bytes."""
+    from bty.web import _db as _bty_db
+    from bty.web import _settings_store, _withcache
+
+    flash_sha = "0123456789abcdef" * 4
+
+    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
+        return _MockResp(b"", headers={"Content-Length": "0"})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)  # warm
+
+    r = app_client.post(
+        "/catalog/entries",
+        json={
+            "image_url": "https://example.invalid/nullres.img.gz",
+            "sha_url": "https://example.invalid/nullres.img.gz.sha256",
+        },
+        cookies=AUTH,
+    )
+    assert r.status_code == 201, r.text
+    ref = r.json()["bty_image_ref"]
+
+    # Simulate an entry whose import never populated resolved_src.
+    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "UPDATE catalog_entries SET resolved_src = NULL WHERE bty_image_ref = ?",
+            (ref,),
+        )
+        conn.commit()
+
+    mac = "aa:bb:cc:dd:ee:c2"
+    app_client.put(
+        f"/machines/{mac}",
+        json={
+            "bty_image_ref": ref,
+            "boot_mode": "bty-flash-always",
+            "target_disk_serial": "WC-NULLRES-SERIAL",
+        },
+        cookies=AUTH,
+    )
+    plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
+    # Served from withcache despite resolved_src being NULL (regression guard
+    # for the spurious `and resolved_src` gate on the netboot cache lookup).
+    assert plan["image"].startswith("http://cache.invalid:3000/b/")
+    assert plan["image"].endswith("/nullres.img.gz")
+    events = app_client.get(
+        "/events",
+        params={"subject_kind": "machine", "subject_id": mac, "kind": "netboot.pxe.plan"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert events[0]["details"]["withcache"] == {
+        "configured": True,
+        "hit": True,
+        "served_from": "withcache",
+    }
+
+
 def test_catalog_toml_rewrites_srcs_through_withcache_when_configured(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
