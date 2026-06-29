@@ -42,25 +42,30 @@ regenerate `compose.yml` with the new sidecar, then
 
 ## Configure the bytes path
 
-In the operator UI, go to **Settings -> Ramboot** and set:
+`bty-lab init` writes `[nbdmux] url = "http://<host>:4040"` into the
+generated `bty.toml` for you (since v0.64.1; same pattern as
+withcache), so the bytes path is already configured when the stack
+comes up. The **Settings -> Ramboot** card is an override surface:
+open it only when you run nbdmux somewhere other than the in-stack
+sidecar (a separate LAN box, a different port), or when you want to
+change the default overlay size.
 
-- **nbdmux URL**: `http://<host>:4040` where `<host>` is the same LAN
-  address operators reach bty-web on. The default deploy publishes
-  port 4040, so this is usually just the bty-web host's address with
-  port 4040 instead of 8080. Empty means "ramboot unavailable";
-  saving an empty value disables the boot mode globally.
+The card carries two fields:
+
+- **nbdmux URL**: leave blank to inherit the deploy default; set to
+  `http://<host>:4040` (or wherever your nbdmux lives) to override.
+  Saving an empty value AND clearing the `[nbdmux] url` line in
+  `bty.toml` disables the boot mode globally; the iPXE chain then
+  falls back to bty-tui with a reason on the events feed.
 - **Overlay size**: `10G` is the default. Sets the tmpfs cap for the
   in-target write overlay. Make this bigger if your workload writes
   more than a few GB of logs / scratch state; cap it lower if you
   need to leave RAM for the running OS. The Linux mount layer parses
-  the value at boot time; an invalid suffix surfaces on the
-  serial console as the initramfs panics, not at form submit.
+  the value at boot time; an invalid suffix surfaces on the serial
+  console as the initramfs panics, not at form submit.
 
 The values resolve as Settings override first, then `$BTY_NBDMUX_URL`
-env (matching the rest of bty's config layering), then the `[nbdmux]
-url` field in `bty.toml`, then unset. A typical deploy lands the URL
-in `bty.toml` from `bty-lab init` and never touches the Settings
-override.
+env, then the `[nbdmux] url` field in `bty.toml`, then unset.
 
 ## Bind a machine to ramboot
 
