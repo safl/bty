@@ -68,12 +68,23 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 # ``boot_mode`` for ``bty-flash-once`` (-> ``sanboot``).
 # ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
 # every cycle.
+# - ``ramboot`` mounts the bound catalog image over NBD (served by
+#   the sidecar ``nbdmux`` daemon) and pivots into it with
+#   overlayfs over tmpfs for writes. The disk is never touched.
+#   Useful for CI / preview runs where flashing is overkill; the
+#   target box runs the OS in place and the overlay vanishes on
+#   reboot. Bytes path is gated on the operator having configured
+#   an nbdmux URL in Settings -> Ramboot AND the bound image having
+#   been pre-warmed (decompressed and registered as an NBD export).
+#   /pxe/{mac}/plan rejects with mode=interactive + a reason when
+#   either gate is open.
 BOOT_MODES = (
     "ipxe-exit",
     "bty-flash-always",
     "bty-flash-once",
     "bty-tui",
     "bty-inventory",
+    "ramboot",
 )
 
 # iPXE BIOS drive selector the ``sanboot`` policy boots: ``0x80`` is the
