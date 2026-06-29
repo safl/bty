@@ -112,10 +112,25 @@ class WithcacheConfig:
     """withcache integration section.
 
     ``url`` is the base URL of the withcache cache-host. Blank means
-    "no withcache configured" -- bty-web then streams catalog entries
-    from the origin URL directly on each flash. Set to
+    "no withcache configured", and bty-web then streams catalog
+    entries from the origin URL directly on each flash. Set to
     ``http://<lan>:3000`` to route through a local withcache.
     Env: ``BTY_WITHCACHE_URL``.
+    """
+
+    url: str = ""
+
+
+@dataclass(frozen=True)
+class NbdmuxConfig:
+    """nbdmux integration section.
+
+    ``url`` is the base URL of the nbdmux daemon's HTTP control
+    plane (default port 4040). Blank means "no nbdmux configured",
+    and ``boot_mode=ramboot`` is unavailable; the matching Settings
+    card surfaces that to the operator. Set to
+    ``http://<lan>:4040`` to route ramboot through a local nbdmux.
+    Env: ``BTY_NBDMUX_URL``.
     """
 
     url: str = ""
@@ -162,6 +177,7 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     withcache: WithcacheConfig = field(default_factory=WithcacheConfig)
+    nbdmux: NbdmuxConfig = field(default_factory=NbdmuxConfig)
     netboot: NetbootConfig = field(default_factory=NetbootConfig)
     tuning: TuningConfig = field(default_factory=TuningConfig)
 

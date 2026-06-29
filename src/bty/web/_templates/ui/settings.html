@@ -15,6 +15,8 @@
             <span class="vr"></span>
             <a href="#display">Display</a>
             <span class="vr"></span>
+            <a href="#ramboot">Ramboot</a>
+            <span class="vr"></span>
             <a href="#settings-identity">Identity</a>
             <span class="vr"></span>
             <a href="#settings-storage-paths">Storage paths</a>
@@ -291,6 +293,77 @@
 </div>
 </div>
 </div>{# /row display #}
+
+{# Ramboot bytes path: where the in-place NBD multiplexer lives, and
+   what overlay size targets get by default. Both knobs flow into the
+   per-machine ramboot plan rendered by /pxe/{mac}/plan when
+   boot_mode=ramboot. Leaving nbdmux_url empty disables ramboot
+   entirely; the matching machine-edit dropdown rejects the option in
+   that state. #}
+<div class="row g-3 mb-3">
+<div class="col-12">
+<div class="card h-100" id="ramboot">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-hdd-network me-1"></i>Ramboot
+    </div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">
+            Bytes path for the in-place
+            <a href="https://github.com/safl/nbdmux">nbdmux</a>
+            NBD multiplexer that serves catalog images over the
+            network for the <code>ramboot</code> boot mode.
+            Operator binds a machine to <code>ramboot</code>; bty-web
+            decompresses the bound image once, registers it as an
+            NBD export, and the target's initramfs mounts it with an
+            overlayfs over tmpfs. See the
+            <code>ramboot-init</code> bty-media variant for the
+            initramfs side.
+        </p>
+        <form method="post" action="/ui/settings/ramboot">
+            <div class="mb-3">
+                <label for="nbdmux_url" class="form-label">nbdmux URL</label>
+                <input type="url" class="form-control font-monospace" id="nbdmux_url"
+                       name="nbdmux_url"
+                       placeholder="http://nbdmux:4040"
+                       value="{{ nbdmux_url_override or '' }}">
+                <div class="form-text small">
+                    HTTP control plane of the nbdmux daemon (port 4040
+                    by default). Empty disables ramboot; bty-web
+                    rejects ``boot_mode=ramboot`` bindings in that
+                    state. The NBD listener (port 10809) is derived
+                    from the same host.
+                    {% if nbdmux_url_effective %}
+                    Currently effective: <code>{{ nbdmux_url_effective }}</code>.
+                    {% else %}
+                    Currently effective: <span class="text-muted">(none; ramboot unavailable)</span>.
+                    {% endif %}
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="ramboot_overlay_size" class="form-label">Overlay size (default)</label>
+                <input type="text" class="form-control font-monospace" id="ramboot_overlay_size"
+                       name="ramboot_overlay_size"
+                       placeholder="{{ ramboot_overlay_size_default }}"
+                       value="{{ ramboot_overlay_size_override or '' }}"
+                       style="max-width: 12rem;">
+                <div class="form-text small">
+                    Default tmpfs size for the in-target ramboot
+                    overlay (mount syntax: <code>10G</code>,
+                    <code>8192M</code>, ...). Operators can override
+                    per-machine from the machine-edit form. Empty
+                    reverts to <code>{{ ramboot_overlay_size_default }}</code>.
+                    Currently effective:
+                    <code>{{ ramboot_overlay_size_effective }}</code>.
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save me-1"></i>Save ramboot
+            </button>
+        </form>
+    </div>
+</div>
+</div>
+</div>{# /row ramboot #}
 
 {# Four-up row of the config groups (Identity / Storage / Network /
    Background workers). Each card uses a compact list-group layout

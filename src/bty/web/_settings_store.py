@@ -71,6 +71,24 @@ DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/latest/download/cat
 KEY_WITHCACHE_URL = "withcache.url"
 ENV_WITHCACHE_URL = "BTY_WITHCACHE_URL"
 
+# Optional nbdmux daemon. When set, bty's ``boot_mode=ramboot`` uses
+# it as the NBD-export multiplexer that serves catalog images over
+# the network for in-place ramboot. The value is the HTTP control
+# plane URL (e.g. ``http://nbdmux:4040``); bty derives the NBD
+# endpoint from the same host on port 10809. Resolves override ->
+# env -> unset, same shape as ``KEY_WITHCACHE_URL``.
+KEY_NBDMUX_URL = "nbdmux.url"
+ENV_NBDMUX_URL = "BTY_NBDMUX_URL"
+
+# Default tmpfs size for the in-target ramboot overlay. Operators
+# override per-bind from the machine-edit form. Value is a string
+# accepted by Linux's ``mount -t tmpfs -o size=...``. Conservative
+# default keeps a CI / preview workload from filling host RAM by
+# accident; long-running boots may need a bigger value.
+KEY_RAMBOOT_OVERLAY_SIZE = "ramboot.overlay_size"
+ENV_RAMBOOT_OVERLAY_SIZE = "BTY_RAMBOOT_OVERLAY_SIZE"
+DEFAULT_RAMBOOT_OVERLAY_SIZE = "10G"
+
 # Display timezone for ALL operator-facing timestamps rendered by the
 # bty-web UI. bty stores timestamps as UTC; the renderer normalises to
 # the configured zone before formatting. Resolves override -> env ->
@@ -208,6 +226,56 @@ def resolve_withcache_url(conn: sqlite3.Connection) -> str | None:
     if configured:
         return configured
     return (os.environ.get(ENV_WITHCACHE_URL) or "").strip() or None
+
+
+def resolve_nbdmux_url(conn: sqlite3.Connection) -> str | None:
+    """The nbdmux daemon's HTTP control plane base URL, or ``None``
+    if unconfigured. Same resolution shape as
+    :func:`resolve_withcache_url`: override (Settings -> Bytes path)
+    wins, then ``[nbdmux] url`` from ``bty.toml``, then
+    ``$BTY_NBDMUX_URL`` env, else ``None`` (ramboot is unavailable).
+
+    Returning ``None`` is not an error; it means an operator who
+    binds ``boot_mode=ramboot`` will see a clear "nbdmux not
+    configured" rejection from the form rather than a half-working
+    flow that fails at boot time.
+    """
+    override = get(conn, KEY_NBDMUX_URL)
+    if override:
+        return override
+    try:
+        from bty.web._config import cfg as _cfg
+
+        configured = (_cfg().nbdmux.url or "").strip()
+    except (RuntimeError, AttributeError):
+        # AttributeError covers older bty.toml configs that predate
+        # the [nbdmux] section: cfg().nbdmux is missing entirely.
+        # Fall through to env / unset rather than raising.
+        configured = ""
+    if configured:
+        return configured
+    return (os.environ.get(ENV_NBDMUX_URL) or "").strip() or None
+
+
+def resolve_ramboot_overlay_size(conn: sqlite3.Connection) -> str:
+    """The default tmpfs size for the ramboot overlay
+    (``size=<value>`` on the mount command, units mount understands:
+    ``10G``, ``8192M``, etc.). Resolves override -> env ->
+    :data:`DEFAULT_RAMBOOT_OVERLAY_SIZE`.
+
+    The mount layer validates the units at boot time; this resolver
+    just round-trips the string. A bad value surfaces in the
+    initramfs panic message rather than at bty-web render time, so
+    operators see "tmpfs failed: invalid size" on the serial console
+    rather than a Settings-form rejection. Acceptable since
+    overlay size is a small, well-trodden setting and Linux's
+    error message is descriptive.
+    """
+    raw = (
+        get(conn, KEY_RAMBOOT_OVERLAY_SIZE)
+        or (os.environ.get(ENV_RAMBOOT_OVERLAY_SIZE) or "").strip()
+    )
+    return raw or DEFAULT_RAMBOOT_OVERLAY_SIZE
 
 
 # ----- Backup schedule resolvers ----------------------------------------

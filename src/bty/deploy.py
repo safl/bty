@@ -121,10 +121,30 @@ services:
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/withcache:/data
 
+  # nbdmux sidecar serves catalog images over NBD for bty's ramboot
+  # boot mode. Port 4040 is the HTTP control plane (bty-web POSTs
+  # exports on the pre-warm path); port 10809 is the NBD listener
+  # that ramboot targets connect to from their initramfs. The images
+  # dir is bind-mounted into BOTH containers so bty-web's decompress
+  # step lands the .img bytes where nbdmux can serve them, no copy.
+  nbdmux:
+    image: ghcr.io/safl/nbdmux:latest
+    restart: unless-stopped
+    dns:
+      - ${{BTY_DNS:-1.1.1.1}}
+    ports:
+      - "4040:4040"
+      - "10809:10809"
+    environment:
+      NBDMUX_ADMIN_PASSWORD: ${{NBDMUX_ADMIN_PASSWORD:-}}
+    volumes:
+      - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux:/data
+      - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux/images:/images
+
   bty-web:
     image: ghcr.io/safl/bty-web:{version}
     restart: unless-stopped
-    # See note on withcache.dns -- same reason.
+    # See note on withcache.dns; same reason.
     dns:
       - ${{BTY_DNS:-1.1.1.1}}
     ports:
@@ -142,8 +162,12 @@ services:
       # RW (no :ro) so Settings-page edits land back on the host file,
       # matching the Quadlet unit's mount.
       - ./bty.toml:/etc/bty/bty.toml
+      # bty-web decompresses catalog images here on the ramboot
+      # pre-warm path; nbdmux serves them over NBD. Shared bind.
+      - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux/images:/var/lib/bty/live-images
     depends_on:
       - withcache
+      - nbdmux
 
   tftp:
     image: ghcr.io/safl/bty-tftp:{version}
@@ -167,8 +191,8 @@ def _env_example(default_data_dir: str) -> str:
 # ==== REQUIRED ====
 
 # This host's LAN address. Booting clients fetch images + boot scripts
-# from here, so it MUST be reachable from those machines -- NOT
-# 127.0.0.1, NOT a container name.
+# from here, so it MUST be reachable from those machines; not
+# 127.0.0.1, not a container name.
 HOST_ADDR=10.0.0.5
 
 # Operator login for the withcache UI at http://<host>:3000/.
@@ -181,6 +205,13 @@ WITHCACHE_ADMIN_PASSWORD=change-me
 # warning on first boot). Set this before exposing past a trusted
 # LAN.
 # BTY_ADMIN_PASSWORD=change-me
+
+# Gates the nbdmux operator UI at http://<host>:4040/ (constant-
+# time password compare). UNSET = UI open with a startup warning.
+# Same posture as BTY_ADMIN_PASSWORD: fine on a trusted LAN, set
+# this before exposing past one. nbdmux's NBD port (10809) is
+# unauthenticated regardless; firewall it to the lab's LAN.
+# NBDMUX_ADMIN_PASSWORD=change-me
 
 # ==== COMMON CUSTOMISATIONS ====
 
