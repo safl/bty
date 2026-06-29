@@ -1,0 +1,43 @@
+doc: |
+  bty ramboot-init live env build
+  ===============================
+
+  Builds the slim kernel + initrd pair used by bty's ``ramboot``
+  boot mode. The initramfs carries ``nbd-client`` + ``busybox-
+  static`` + a custom ``ramboot`` driver script that mounts a
+  catalog image over NBD (served by ``nbdmux``) and pivots into
+  it with overlayfs over tmpfs for writes.
+
+  Distinct from ``netboot-pc``: the ramboot init script bypasses
+  live-boot's squashfs flow entirely, so the squashfs lb still
+  builds is dropped at publish time. Only ``vmlinuz`` + ``initrd``
+  ship under ``publish.dir`` (plus the matching ``.sha256``).
+
+  Steps:
+
+  1. ``bty_wheel_stage`` -- builds the bty-lab wheel from the
+     parent repo and stages it under ``live-build/config/
+     includes.chroot/opt/bty/``. The chroot install hook installs
+     it (with the ``[tui]`` extra) into ``/opt/bty/venv``. The
+     ramboot-init initramfs doesn't USE the wheel itself --
+     ramboot pivots away to the catalog image's root before
+     userspace -- but the same chroot is shared with netboot-pc
+     so the wheel install is harmless and keeps the chroot
+     symmetric.
+  2. ``ramboot_init_build`` -- copies ``live-build/`` into a
+     working dir, runs ``sudo env BTY_VARIANT=ramboot-init lb
+     clean --all && lb build``, and publishes
+     ``bty-ramboot-init-x86_64-v<version>.{vmlinuz,initrd}``
+     plus a sha256 manifest under ``publish.dir``.
+
+  Requires: live-build on the build host (``apt install live-
+  build``) plus passwordless sudo (live-build's chroot
+  operations are privileged). CI runners have NOPASSWD; local
+  devs run with sudo.
+
+steps:
+- name: bty_wheel_stage
+  uses: bty_wheel_stage
+
+- name: ramboot_init_build
+  uses: ramboot_init_build

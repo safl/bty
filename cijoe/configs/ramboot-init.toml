@@ -1,0 +1,35 @@
+# bty ramboot-init live env - build configuration
+#
+# Drives Debian's live-build (``--binary-images netboot``) with
+# ``BTY_VARIANT=ramboot-init`` to produce a slim kernel + initrd
+# pair used by bty's ``ramboot`` boot mode. The initramfs carries
+# ``nbd-client`` + ``busybox-static`` + an ``/etc/initramfs-
+# tools/scripts/ramboot`` driver that mounts a catalog image over
+# NBD (served by ``nbdmux``) and pivots into it with overlayfs over
+# tmpfs for writes.
+#
+# Distinct from ``netboot-pc`` (which produces the kernel + initrd
+# + squashfs trio for the bty TUI live env): the ramboot-init init
+# script bypasses live-boot's squashfs flow entirely, so the
+# squashfs lb still builds is dropped at publish time. See
+# ``cijoe/scripts/ramboot_init_build.py`` for the publish step
+# and ``bty-media/live-build/config/includes.chroot/etc/initramfs-
+# tools/scripts/ramboot`` for the initramfs driver.
+#
+# Usage:
+#   cijoe tasks/ramboot-init.yaml --config configs/ramboot-init.toml --monitor
+# (or via the Makefile dispatcher: ``make build VARIANT=ramboot-init``)
+
+[bty]
+variant = "ramboot-init"
+hostname = "bty-ramboot-init"
+timezone = "UTC"
+
+[cijoe.workflow]
+fail_fast = true
+
+# Where the published artifacts land. Mirrors the netboot-pc /
+# usbboot-pc variants' default so all images live under one
+# directory tree.
+[system-imaging.images.bty-ramboot-init-x86_64]
+publish.dir = "{{ local.env.HOME }}/system_imaging/disk"
