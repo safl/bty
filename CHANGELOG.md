@@ -9,6 +9,24 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.61.1] - 2026-06-29
+
+### Added
+
+- **Settings -> Display: timezone override for the UI.** All
+  operator-facing timestamps in bty-web (machine "Last seen",
+  catalog "Last flashed", event log, ...) used to render as UTC
+  with no TZ marker -- easy to read as local time and miscompare
+  against a shell clock. The renderer now appends the zone's
+  short name (e.g. ``2026-06-25 10:09:40 UTC``,
+  ``2026-06-25 12:09:40 CEST``) and operators can set a display
+  timezone (any IANA name: ``Europe/Copenhagen``,
+  ``America/New_York``, ...) via Settings -> Display or
+  ``$BTY_DISPLAY_TZ``. Default stays UTC (the storage standard).
+  The form validates the IANA name before persisting; a bad name
+  redirects back with an error rather than writing a value the
+  renderer would silently fall back from.
+
 ## [0.61.0] - 2026-06-28
 
 ### Added
