@@ -30,14 +30,22 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 # Variant -> destination directory relative to ``bty-media/``.
-# Variants not listed here are skipped with rc=0. All three live-
-# build variants share the same chroot tree, so they share the
-# same target dir.
+# Variants not listed here are skipped with rc=0. The live-build
+# variants share the same chroot tree, so they share the same
+# target dir.
+#
+# ``ramboot-init`` does not actually use the staged wheel at boot
+# time (its initrd pivots to the catalog image's root before any
+# of bty's userspace runs), but the shared chroot's
+# ``0500-bty-install`` hook expects to find the wheel under
+# ``/opt/bty/`` regardless of variant. Staging it here keeps the
+# chroot symmetric and lb build green.
 _LIVE_CHROOT_BTY = Path("live-build") / "config" / "includes.chroot" / "opt" / "bty"
 TARGET_DIRS: dict[str, Path] = {
     "netboot-pc": _LIVE_CHROOT_BTY,
     "usbboot-pc": _LIVE_CHROOT_BTY,
     "usbboot-rpi": _LIVE_CHROOT_BTY,
+    "ramboot-init": _LIVE_CHROOT_BTY,
 }
 
 
