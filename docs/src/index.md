@@ -34,6 +34,7 @@ overview
 walkthrough-catalog
 walkthrough-image-store
 walkthrough-server-docker
+walkthrough-ramboot
 ```
 
 ```{toctree}
