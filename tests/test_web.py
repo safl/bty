@@ -5192,9 +5192,10 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
         conn.commit()
     page = app_client.get("/ui/machines", cookies=AUTH)
     assert page.status_code == 200, page.text
-    # Compact form rendered in the row body (no offset, no " UTC").
-    assert "2026-05-17 20:21:09" in page.text
-    assert "2026-05-17 20:21:09 UTC" not in page.text
+    # Compact form rendered in the row body with a TZ abbreviation
+    # appended so the operator never confuses UTC for local time. The
+    # default zone is UTC (the bty storage standard).
+    assert "2026-05-17 20:21:09 UTC" in page.text
     # Raw form kept in the title= attribute for hover precision.
     assert 'title="2026-05-17T20:21:09.155109+00:00"' in page.text
 

@@ -26,6 +26,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import (
@@ -88,6 +89,38 @@ LSHW_MAX_BYTES = 4 * 1024 * 1024
 
 TEMPLATES_DIR = Path(__file__).parent / "_templates"
 STATIC_DIR = Path(__file__).parent / "_static"
+
+
+# Per-state_path display-timezone cache. The TZ rarely changes across
+# a bty-web process lifetime so a single DB read per process (per
+# state.db, in case tests stand up multiple) is enough. The Settings
+# POST handler invalidates by calling :func:`invalidate_display_tz_cache`
+# after a successful write so the next render picks up the new value.
+_DISPLAY_TZ_CACHE: dict[str, Any] = {}  # str(state_path) -> ZoneInfo
+
+
+def _cached_display_tz(state_path: Path) -> ZoneInfo:
+    key = str(state_path)
+    if key in _DISPLAY_TZ_CACHE:
+        return _DISPLAY_TZ_CACHE[key]  # type: ignore[no-any-return]
+    try:
+        with _db.open_db(state_path) as conn:
+            tz: ZoneInfo = _settings_store.resolve_display_timezone(conn)
+    except Exception:
+        # A bad stored value or a transient DB error must not 500
+        # every template render. Fall back to UTC silently; the
+        # Settings page is where the operator sees the parse error.
+        tz = ZoneInfo("UTC")
+    _DISPLAY_TZ_CACHE[key] = tz
+    return tz
+
+
+def invalidate_display_tz_cache(state_path: Path) -> None:
+    """Drop the cached display TZ for ``state_path``. Called by the
+    Settings POST handler after a successful display.timezone write
+    so the next render reflects the change without a process restart.
+    """
+    _DISPLAY_TZ_CACHE.pop(str(state_path), None)
 
 
 def create_app(
@@ -292,13 +325,22 @@ def create_app(
     jinja.globals["bty_version"] = bty.__version__
 
     def _fmt_ts(value: object) -> str:
-        """Render a timestamp compactly as ``YYYY-MM-DD HH:MM:SS``.
+        """Render a timestamp as ``YYYY-MM-DD HH:MM:SS <TZ>``.
 
         The on-disk shape (``_now_iso``) is
         ``2026-05-17T20:21:09.155109+00:00`` -- microseconds and the
-        ``+00:00`` offset are noise for an operator scanning a row, so
-        this trims to second precision and drops the offset. The single
-        display format used everywhere a timestamp is shown.
+        raw ``+HH:MM`` offset are noise for an operator scanning a
+        row. The renderer trims to second precision and converts to
+        the configured display timezone
+        (:func:`_settings_store.resolve_display_timezone`), then
+        appends the zone's short name (e.g. ``UTC``, ``CEST``,
+        ``EST``) so the value is unambiguous even when the operator
+        cross-references against a shell clock in their local time.
+
+        Default zone is UTC. An operator can override per-instance via
+        the Settings UI or ``$BTY_DISPLAY_TZ``. The resolved zone is
+        cached per state_path; the Settings POST handler invalidates
+        the cache when it persists a new value.
 
         Accepts either an ISO-8601 string (DB columns) or a
         ``datetime`` (e.g. a file mtime). Defensive: returns the input
@@ -314,11 +356,15 @@ def create_app(
                 return value
         else:
             return ""
-        # All bty timestamps are written UTC; normalise any attached
-        # offset to UTC, then drop tzinfo for the bare-second display.
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(UTC).replace(tzinfo=None)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        # All bty timestamps are written UTC; convert to the display
+        # zone (UTC by default) before trimming. ``dt`` may be naive
+        # if a caller passed e.g. a file mtime -- treat that as UTC
+        # since that's bty's storage standard.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        tz = _cached_display_tz(state_path)
+        dt = dt.astimezone(tz)
+        return dt.strftime("%Y-%m-%d %H:%M:%S ") + (dt.tzname() or "")
 
     jinja.filters["fmt_ts"] = _fmt_ts
 

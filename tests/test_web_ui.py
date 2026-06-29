@@ -2157,6 +2157,98 @@ def test_ui_settings_backup_invalid_retention_rejects(client: TestClient) -> Non
         assert r.status_code == 422, bad
 
 
+def test_ui_settings_display_renders_form_and_default_label(
+    client: TestClient,
+) -> None:
+    """Settings page carries a Display card with the timezone input,
+    anchored at ``#display`` and reachable from the subnav."""
+    _login(client)
+    body = client.get("/ui/settings").text
+    assert 'id="display"' in body
+    assert 'href="#display"' in body
+    assert 'action="/ui/settings/display"' in body
+    assert 'name="display_timezone"' in body
+    # Default is UTC; the form text shows "Currently effective: UTC".
+    assert "Currently effective:" in body
+    assert "UTC" in body
+
+
+def test_ui_settings_display_persists_valid_tz_and_clears(
+    client: TestClient,
+) -> None:
+    """A valid IANA name persists and shows up on the next render;
+    an empty post clears the override (back to UTC)."""
+    _login(client)
+    r = client.post(
+        "/ui/settings/display",
+        data={"display_timezone": "Europe/Copenhagen"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/ui/settings?saved=display#display"
+    body = client.get("/ui/settings").text
+    assert "Europe/Copenhagen" in body
+    # Clearing reverts to UTC.
+    client.post("/ui/settings/display", data={"display_timezone": ""})
+    body2 = client.get("/ui/settings").text
+    # The input field is empty when no override is set; the effective
+    # value falls through to UTC.
+    assert 'name="display_timezone"' in body2
+    assert 'value="Europe/Copenhagen"' not in body2
+
+
+def test_ui_settings_display_rejects_bad_tz_with_error(
+    client: TestClient,
+) -> None:
+    """A bad IANA name redirects with an error and does NOT persist."""
+    _login(client)
+    r = client.post(
+        "/ui/settings/display",
+        data={"display_timezone": "Not/Real/Zone"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "/ui/settings?error=" in r.headers["location"]
+    # Round-trip the page: the bad value is NOT persisted -- the
+    # input is empty (default UTC) on the next render.
+    body = client.get("/ui/settings").text
+    assert "Not/Real/Zone" not in body
+
+
+def test_ui_settings_display_renders_timestamps_in_configured_tz(
+    client: TestClient,
+) -> None:
+    """After setting display.timezone to a zone with a stable
+    abbreviation, machine-row timestamps render with that abbreviation
+    appended (the abbrev disambiguates the conversion at a glance)."""
+    from bty.web import _db as _bty_db
+
+    _login(client)
+    client.post(
+        "/ui/settings/display",
+        data={"display_timezone": "America/New_York"},
+    )
+    state_path = client.app.state.state_path  # type: ignore[attr-defined]
+    with _bty_db.open_db(state_path) as conn:
+        conn.execute(
+            "INSERT INTO machines (mac, boot_mode, last_seen_at, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                "aa:bb:cc:dd:ee:01",
+                "bty-tui",
+                "2026-06-25T16:00:00+00:00",  # 16:00 UTC = 12:00 EDT
+                "2026-06-25T16:00:00+00:00",
+                "2026-06-25T16:00:00+00:00",
+            ),
+        )
+        conn.commit()
+    body = client.get("/ui/machines").text
+    # 16:00 UTC -> 12:00 EDT (DST), with EDT abbrev appended.
+    assert "2026-06-25 12:00:00 EDT" in body
+    # The UTC form must NOT be present (proves the conversion happened).
+    assert "2026-06-25 16:00:00 UTC" not in body
+
+
 def test_settings_upstream_override_drives_catalog_fetch_url(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

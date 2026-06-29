@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from bty.web._releases import DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
 
@@ -67,6 +68,16 @@ DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/download/2026.W25/c
 # the systemd unit ($BTY_WITHCACHE_URL) without a DB write.
 KEY_WITHCACHE_URL = "withcache.url"
 ENV_WITHCACHE_URL = "BTY_WITHCACHE_URL"
+
+# Display timezone for ALL operator-facing timestamps rendered by the
+# bty-web UI. bty stores timestamps as UTC; the renderer normalises to
+# the configured zone before formatting. Resolves override -> env ->
+# UTC. The override is an IANA zone name (``Europe/Copenhagen``,
+# ``America/New_York``, ``UTC``); an invalid name raises
+# :class:`SettingValueError` at resolve time and the Settings form
+# rejects it before persisting.
+KEY_DISPLAY_TZ = "display.timezone"
+ENV_DISPLAY_TZ = "BTY_DISPLAY_TZ"
 
 # Scheduled-backup knobs. The Settings page exposes ``enabled`` +
 # ``cadence`` + ``retention``; the scheduler loop reads them on each
@@ -141,6 +152,30 @@ def resolve_netboot_tag(conn: sqlite3.Connection) -> str:
     """The effective netboot release tag to fetch: override ->
     :data:`DEFAULT_TAG` (``latest``)."""
     return get(conn, KEY_NETBOOT_TAG) or DEFAULT_TAG
+
+
+def resolve_display_timezone(conn: sqlite3.Connection) -> ZoneInfo:
+    """The effective timezone used to render operator-facing timestamps
+    in the bty-web UI: override -> ``$BTY_DISPLAY_TZ`` -> UTC.
+
+    The override is an IANA zone name. The Settings form validates
+    before persisting (via :class:`ZoneInfo`), so a bad value here
+    means an out-of-band write to state.db or a stale row from an
+    older schema. Pre-1.0 wants a loud failure on that, not a silent
+    UTC fallback that hides the divergence; this raises
+    :class:`SettingValueError` so the renderer surfaces the bug
+    to the operator.
+    """
+    raw = get(conn, KEY_DISPLAY_TZ) or (os.environ.get(ENV_DISPLAY_TZ) or "").strip()
+    if not raw:
+        return ZoneInfo("UTC")
+    try:
+        return ZoneInfo(raw)
+    except ZoneInfoNotFoundError as exc:
+        raise SettingValueError(
+            f"{KEY_DISPLAY_TZ}={raw!r} is not a known IANA timezone "
+            f"(expected e.g. 'UTC', 'Europe/Copenhagen', 'America/New_York')"
+        ) from exc
 
 
 def resolve_withcache_url(conn: sqlite3.Connection) -> str | None:

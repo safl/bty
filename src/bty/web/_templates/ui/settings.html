@@ -13,6 +13,8 @@
             <span class="vr"></span>
             <a href="#backup-schedule">Backup schedule</a>
             <span class="vr"></span>
+            <a href="#display">Display</a>
+            <span class="vr"></span>
             <a href="#settings-identity">Identity</a>
             <span class="vr"></span>
             <a href="#settings-storage-paths">Storage paths</a>
@@ -244,6 +246,51 @@
 </div>
 </div>{# /col backup-schedule #}
 </div>{# /row netboot + backup #}
+
+{# Display card: timezone the UI uses to render every operator-facing
+   timestamp. bty stores in UTC; an empty value defaults to UTC. A
+   bad IANA name redirects back with an error rather than persisting
+   a broken value. #}
+<div class="row g-3 mb-3">
+<div class="col-12">
+<div class="card h-100" id="display">
+    <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-clock me-1"></i>Display
+    </div>
+    <div class="card-body">
+        <form method="post" action="/ui/settings/display">
+            <div class="mb-3">
+                <label for="display_timezone" class="form-label">Timezone</label>
+                <input type="text" class="form-control font-monospace" id="display_timezone"
+                       name="display_timezone"
+                       placeholder="UTC"
+                       value="{{ display_timezone_override or '' }}"
+                       style="max-width: 24rem;">
+                <div class="form-text small">
+                    IANA zone name (e.g. <code>Europe/Copenhagen</code>,
+                    <code>America/New_York</code>, <code>UTC</code>). All
+                    operator-facing timestamps in bty-web are converted from
+                    UTC (the storage standard) to this zone before display.
+                    Empty = revert to UTC. The change takes effect on the
+                    next page render; no restart needed.
+                    {% if display_timezone_override %}
+                    Currently effective:
+                    <code>{{ display_timezone_effective }}</code>.
+                    {% else %}
+                    Currently effective:
+                    <code>{{ display_timezone_effective }}</code>
+                    <span class="text-muted">(default)</span>.
+                    {% endif %}
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save me-1"></i>Save display
+            </button>
+        </form>
+    </div>
+</div>
+</div>
+</div>{# /row display #}
 
 {# Four-up row of the config groups (Identity / Storage / Network /
    Background workers). Each card uses a compact list-group layout

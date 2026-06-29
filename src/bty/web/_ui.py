@@ -1524,6 +1524,14 @@ def register_ui_routes(
             netboot_repo_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
             netboot_tag_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
             catalog_url_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
+            display_timezone_override = _settings_store.get(conn, _settings_store.KEY_DISPLAY_TZ)
+            try:
+                display_timezone_effective = str(_settings_store.resolve_display_timezone(conn))
+            except _settings_store.SettingValueError as exc:
+                # A bad stored value -- surface as the effective value
+                # so the operator sees what's broken on the form, but
+                # don't 500 the page render.
+                display_timezone_effective = f"(invalid: {exc})"
         upstream = {
             "netboot_repo": netboot_repo,
             "netboot_repo_override": netboot_repo_override,
@@ -1676,6 +1684,8 @@ def register_ui_routes(
             backup_cadences=_settings_store.BACKUP_CADENCES,
             backup_retention_count=backup_retention_count,
             backup_last_run_at=backup_last_run_at,
+            display_timezone_override=display_timezone_override,
+            display_timezone_effective=display_timezone_effective,
             missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
             # Provenance / write-target info for the editable config
             # rows: the path the Settings POST handler writes to (or
@@ -1703,6 +1713,7 @@ def register_ui_routes(
         flash_map = {
             "upstream": "Upstream sources saved.",
             "backup": "Backup schedule saved.",
+            "display": "Display settings saved.",
         }
         flash = flash_map.get(saved or "")
         return _render_settings_page(request, flash=flash, flash_kind="success" if flash else None)
@@ -1998,6 +2009,63 @@ def register_ui_routes(
         return RedirectResponse(
             "/ui/settings?saved=backup#backup-schedule",
             status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @app.post(
+        "/ui/settings/display",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_settings_display(
+        request: Request,
+        display_timezone: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        """Save (or clear) the display-timezone override. The value is
+        an IANA zone name (``Europe/Copenhagen``, ``UTC``, ...) used to
+        render every operator-facing timestamp in bty-web. An empty
+        field clears the override and reverts to UTC (the bty storage
+        standard).
+
+        The new value is validated by constructing a :class:`ZoneInfo`
+        before persisting; a bad name redirects back with an error
+        rather than writing a broken value the renderer would fall
+        back from. After a successful write the renderer cache is
+        invalidated so the change takes effect on the next page.
+        """
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        from bty.web._app import invalidate_display_tz_cache
+
+        raw = display_timezone.strip()
+        if raw:
+            try:
+                ZoneInfo(raw)
+            except ZoneInfoNotFoundError:
+                return RedirectResponse(
+                    "/ui/settings?error="
+                    + urllib.parse.quote(f"unknown timezone {raw!r}", safe=""),
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
+        with _db.open_db(state_path) as conn:
+            old = _settings_store.get(conn, _settings_store.KEY_DISPLAY_TZ)
+            if raw:
+                _settings_store.set_value(conn, _settings_store.KEY_DISPLAY_TZ, raw)
+            else:
+                _settings_store.clear(conn, _settings_store.KEY_DISPLAY_TZ)
+            _events_log.record(
+                conn,
+                kind="settings.display.updated",
+                summary=f"display timezone set to {raw or '(default UTC)'}",
+                subject_kind="settings",
+                subject_id="display",
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"display_timezone": {"old": old, "new": raw or None}},
+            )
+            conn.commit()
+        invalidate_display_tz_cache(state_path)
+        return RedirectResponse(
+            "/ui/settings?saved=display#display", status_code=status.HTTP_303_SEE_OTHER
         )
 
     @app.post(
