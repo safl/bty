@@ -42,6 +42,7 @@ from bty.web import (
     _db,
     _events_log,
     _labels,
+    _ramboot_cache,
     _releases,
     _settings_store,
     _sysconfig,
@@ -466,6 +467,10 @@ def register_ui_routes(
             machine_events = _events_log.list_events(
                 conn, subject_kind="machine", limit=_events_log.RECENT_EVENTS_LIMIT
             )
+            # Per-row ramboot pre-warm status. One lookup; the row
+            # template renders the status pill under the boot-mode
+            # badge when boot_mode=ramboot.
+            ramboot_status_by_ref = _ramboot_cache.statuses_by_ref(conn)
         machines = [_row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
         # from ``POST /ui/machines/{mac}/delete`` so the operator gets a
@@ -516,6 +521,7 @@ def register_ui_routes(
             sse_eligible=sse_eligible,
             flash_deleted=flash_deleted,
             flash_missing=flash_missing,
+            ramboot_status_by_ref=ramboot_status_by_ref,
         )
 
     @app.get(

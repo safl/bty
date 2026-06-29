@@ -9,6 +9,41 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.64.0] - 2026-06-30
+
+### Added
+
+Ramboot pre-warm worker. When the operator binds a machine to
+`boot_mode=ramboot`, bty-web now decompresses the bound catalog
+image once into `<state_dir>/live-images/<ref>.img`, registers it
+with the configured nbdmux daemon as a named export, and gates
+the iPXE chain on that pre-warm completing. The iPXE
+`/pxe/{mac}` branch falls back to `bty-tui` when nbdmux is
+unconfigured, no ref is bound, or the pre-warm hasn't finished
+yet, so the box hits the wizard rather than the initramfs
+panicking on a non-existent NBD export.
+
+The pre-warm state lives in a new `ramboot_cache` table (one row
+per ref, status: queued / fetching / decompressing / registering
+/ ready / failed). The machine listing surfaces the status as a
+small pill under the ramboot boot-mode badge. Four new audit
+event kinds (`ramboot.pre_warm.{requested,started,completed,
+failed}`) land in the events feed so the operator can trace the
+worker's progress.
+
+bty-lab gains an explicit dependency on `nbdmux>=0.1.2` for the
+client library; the deploy stack already pulled the daemon in
+two releases ago.
+
+Worker semantics: single-threaded by design so a fleet of
+ramboot machines bound to the same image converges on one file
+on disk rather than racing through duplicate decompresses. The
+worker survives a bty-web restart; queued / in-flight rows
+resume on startup. A `ready` row stays `ready` (the nbdmux
+export survives bty-web restarts because the daemon is a
+separate process); a `failed` row stays `failed` until the
+operator re-saves the binding, which re-enqueues at `queued`.
+
 ## [0.63.0] - 2026-06-29
 
 ### Added
