@@ -47,20 +47,22 @@ DEFAULT_TAG = "latest"
 
 # Default URL the "Fetch catalog" button pulls bytes from.
 #
-# Pinned to a specific nosi release: the URL carries an explicit
-# ISO-week tag rather than ``/latest/``. The bty version this
-# default ships with permanently encodes which catalog week it
-# was built against, so two operators running the same bty
-# version get byte-identical catalog content. Upgrading bty (or
-# editing the URL in Settings) is the only way to roll the
-# catalog forward; ``/latest/`` would silently roll under the
-# operator's feet, which we no longer do for the default.
+# Points at nosi's ``/releases/latest/`` so a fresh ``bty-lab init``
+# picks up whatever nosi release is current at fetch time, instead
+# of an ISO-week tag baked into the bty version that drifts the
+# moment a new bty release isn't cut.
 #
-# Bump this URL whenever the bty version bumps. The pinned week
-# is chosen at bty release time (typically the current
-# ``date -u +'%G.W%V'``); the nosi release for that week is what
-# the bty release was tested against.
-DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/download/2026.W25/catalog.toml"
+# Byte-stability for production -- "two operators on the same bty
+# version see the same catalog content" -- is now provided by
+# withcache (since v0.59.0). Once an operator's withcache has the
+# catalog's referenced images cached, evicting cache entries is
+# how they choose to roll forward; until they do, every fetch
+# resolves to the same cached blob regardless of what ``/latest/``
+# rolled to upstream. Operators who want a hard pin (truly
+# reproducible across cache evictions, or for production deploys
+# where rolling under the operator's feet would surprise) paste a
+# week-tagged URL into Settings -> Catalog.
+DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/latest/download/catalog.toml"
 
 # Optional withcache cache-host. When set, bty prefers it as the image
 # *source* for artifacts it already holds (else serves the artifact as

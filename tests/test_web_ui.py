@@ -173,10 +173,10 @@ def test_ui_images_renders_default_catalog_url(
     assert r.status_code == 200
     body = r.text
     assert "safl/nosi" in body
-    # Default pins to a specific nosi ISO-week release at the time
-    # bty was cut (not /latest/), so two operators on the same bty
-    # version see byte-identical catalog content.
-    assert "/releases/download/" in body
+    # Default tracks nosi's /releases/latest/ (since v0.61.2);
+    # byte-stability across operators is provided by withcache,
+    # not by pinning the URL into the bty release.
+    assert "/releases/latest/download/" in body
     assert "/catalog.toml" in body
     assert 'action="/ui/catalog/fetch-release"' in body
 

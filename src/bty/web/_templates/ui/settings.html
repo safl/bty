@@ -72,23 +72,23 @@
         </p>
         <div class="border-start border-info border-3 ps-3 small mb-3" role="note">
             <p class="mb-1">
-                <strong>The default URL pins to the nosi release this
-                bty version was built against</strong>, so two
-                operators on the same bty version see byte-identical
-                catalog content; upgrading bty is what rolls the
-                catalog forward. Three options if you want something
-                else:
+                <strong>The default URL is
+                <code>/releases/latest/download/catalog.toml</code></strong>
+                -- a fresh fetch picks up whatever nosi release is
+                current. Byte-stability across operators is provided
+                by withcache (since v0.59.0): once cached, every
+                fetch resolves to the same bytes until an operator
+                evicts the cache entries. Two options if you want
+                something else:
             </p>
             <ul class="mb-0 mt-1">
-                <li><strong>Pin to a newer week.</strong> Browse
+                <li><strong>Pin to a specific week.</strong> Browse
                     <a href="https://github.com/safl/nosi/releases"
                        target="_blank" rel="noopener">safl/nosi releases</a>,
                     pick a tag (e.g. <code>2026.W26</code>), paste
-                    <code>/releases/download/&lt;tag&gt;/catalog.toml</code>.</li>
-                <li><strong>Always-newest (rolls under your feet).</strong>
-                    Use <code>/releases/latest/download/catalog.toml</code>;
-                    each fetch is internally W-tag-pinned but the
-                    URL roll-forwards with each new nosi release.</li>
+                    <code>/releases/download/&lt;tag&gt;/catalog.toml</code>.
+                    Useful for production deploys where rolling under
+                    your feet would surprise.</li>
                 <li><strong>Rolling oras :latest refs.</strong>
                     Use <code>/releases/latest/download/catalog-latest.toml</code>
                     (or <code>/releases/download/&lt;tag&gt;/catalog-latest.toml</code>);
