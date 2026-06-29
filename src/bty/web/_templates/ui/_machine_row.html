@@ -46,6 +46,8 @@
         <span class="badge bg-primary" title="each boot re-collects the disk inventory, then boots the disk"><i class="bi bi-list-check me-1"></i>{{ m.boot_mode }}</span>
         {% elif m.boot_mode == 'ipxe-exit' %}
         <span class="badge bg-dark" title="boot the local disk: UEFI hands back to firmware, BIOS sanboots the drive"><i class="bi bi-hdd-fill me-1"></i>{{ m.boot_mode }}</span>
+        {% elif m.boot_mode == 'ramboot' %}
+        <span class="badge bg-success" title="boot the catalog image over NBD with overlayfs over tmpfs (disk never touched)"><i class="bi bi-hdd-network me-1"></i>{{ m.boot_mode }}</span>
         {% else %}
         <span class="badge bg-secondary" title="unrecognised boot mode (stale record)"><i class="bi bi-hdd me-1"></i>{{ m.boot_mode }}</span>
         {% endif %}

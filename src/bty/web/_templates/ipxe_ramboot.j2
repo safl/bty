@@ -1,0 +1,45 @@
+#!ipxe
+# bty ramboot for {{ mac }}
+#   image_ref:    {{ image_ref }}
+#   nbd_endpoint: tcp://{{ nbd_host }}:{{ nbd_port }}
+#   overlay_size: {{ overlay_size }}
+#
+# Chains into the ramboot-init live env (kernel + slim initrd). The
+# initramfs sources ``/etc/initramfs-tools/scripts/ramboot``, which
+# reads ``bty.*`` from /proc/cmdline, nbd-client connects to nbdmux,
+# overlays a tmpfs onto the catalog image's root partition, and
+# pivot_roots into the running OS. The disk is never touched.
+#
+# Unlike the bty-flash chain, ramboot does NOT reach bty's userspace
+# in the live env -- the initramfs pivots away before /sbin/init.
+# So nothing here POSTs back to /pxe/{mac}/done; the best-effort
+# status POST from the initramfs (status=ramboot.up) is the only
+# completion signal. The disk image's own boot sequence runs as if
+# the box had booted normally.
+
+set bty-base http://{{ host }}
+# The kernel + initrd URLs (fetched by iPXE) carry ``?mac={{ mac }}``.
+# Same as the flash chain: positive proof THIS box booted ramboot.
+# bty-web logs the boot fetch as a ramboot.kernel_fetched event so
+# the operator timeline shows the chain firing before the
+# in-initrd status POST lands.
+#
+# Console: same set as the flash chain (tty0 + ttyS1 + ttyS0,
+# earlyprintk on ttyS0). The matching rationale in ipxe_flash.j2
+# applies verbatim; ramboot pivots to the catalog image's own init
+# which has its own console policy, but kernel boot + initramfs
+# messages need to reach the operator regardless.
+#
+# Modprobe blacklist: same set as the flash chain, same reasons
+# (nouveau wedges on iGPUs; rndis_host steals the network on
+# Supermicro / Aspeed BMCs).
+#
+# bty.* params consumed by the ramboot driver in the initramfs:
+#   bty.nbd          = ``tcp://<host>:<port>``, the nbd-server
+#   bty.image        = the named export to attach
+#   bty.overlay_size = tmpfs size for the overlay
+#   bty.server       = where to POST status (best-effort)
+#   bty.mac          = which machine to POST status for
+kernel ${bty-base}/boot/bty-ramboot-init-x86_64-v{{ bty_version }}.vmlinuz?mac={{ mac }} boot=ramboot console=tty0 console=ttyS1,115200 console=ttyS0,115200 earlyprintk=ttyS0,115200 plymouth.enable=0 modprobe.blacklist=nouveau,rndis_host nouveau.modeset=0 systemd.gpt_auto=0 bty.nbd=tcp://{{ nbd_host }}:{{ nbd_port }} bty.image={{ image_ref }} bty.overlay_size={{ overlay_size }} bty.server=${bty-base} bty.mac={{ mac }}
+initrd ${bty-base}/boot/bty-ramboot-init-x86_64-v{{ bty_version }}.initrd?mac={{ mac }}
+boot

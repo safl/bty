@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.63.0] - 2026-06-29
+
+### Added
+
+`boot_mode=ramboot` selectable in the machine-edit dropdown and
+honoured by the iPXE-level dispatch in `/pxe/{mac}`. When the
+operator binds a machine to ramboot, the server emits a new
+`ipxe_ramboot.j2` template that chains the slim ramboot-init live
+env (kernel plus initrd, no squashfs) and passes the in-initrd
+driver the nbd endpoint (derived from the configured nbdmux URL
+on port 10809), the bound image ref, and the default overlay
+size. Falls back to the `bty-tui` chain if nbdmux is not
+configured or no ref is bound, surfacing the misconfiguration in
+the wizard rather than letting the box panic in the initramfs.
+
+Nothing is pre-warmed on the nbdmux side yet; if the operator
+configures ramboot before the next release lands the pre-warm
+worker, the target will boot the ramboot initramfs and fail at
+`nbd-client` connect because the export does not exist. Use this
+path against a hand-registered export until then, or wait for
+the pre-warm worker to land in the next release.
+
 ## [0.62.0] - 2026-06-29
 
 ### Added
