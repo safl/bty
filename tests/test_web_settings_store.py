@@ -209,3 +209,47 @@ def test_display_timezone_empty_string_falls_through_to_utc(
     with _conn(tmp_path) as conn:
         _settings_store.set_value(conn, _settings_store.KEY_DISPLAY_TZ, "")
         assert str(_settings_store.resolve_display_timezone(conn)) == "UTC"
+
+
+# ----- Ramboot resolvers ------------------------------------------------
+
+
+def test_nbdmux_url_unset_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No DB override + no env + no bty.toml -> None (ramboot unavailable)."""
+    monkeypatch.delenv(_settings_store.ENV_NBDMUX_URL, raising=False)
+    with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_nbdmux_url(conn) is None
+
+
+def test_nbdmux_url_env_overrides_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://nbdmux-env:4040")
+    with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-env:4040"
+
+
+def test_nbdmux_url_db_override_wins_over_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://nbdmux-env:4040")
+    with _conn(tmp_path) as conn:
+        _settings_store.set_value(conn, _settings_store.KEY_NBDMUX_URL, "http://nbdmux-db:4040")
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-db:4040"
+
+
+def test_ramboot_overlay_size_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset -> the built-in conservative default."""
+    monkeypatch.delenv(_settings_store.ENV_RAMBOOT_OVERLAY_SIZE, raising=False)
+    with _conn(tmp_path) as conn:
+        assert (
+            _settings_store.resolve_ramboot_overlay_size(conn)
+            == _settings_store.DEFAULT_RAMBOOT_OVERLAY_SIZE
+        )
+
+
+def test_ramboot_overlay_size_db_override_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(_settings_store.ENV_RAMBOOT_OVERLAY_SIZE, "4G")
+    with _conn(tmp_path) as conn:
+        _settings_store.set_value(conn, _settings_store.KEY_RAMBOOT_OVERLAY_SIZE, "16G")
+        assert _settings_store.resolve_ramboot_overlay_size(conn) == "16G"

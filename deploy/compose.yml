@@ -38,10 +38,35 @@ services:
     volumes:
       - ${BTY_HOST_DATA_DIR:-./data}/withcache:/data
 
+  # nbdmux sidecar serves catalog images over NBD for bty's ramboot
+  # boot mode. Port 4040 is the HTTP control plane (bty-web POSTs
+  # exports to it on the pre-warm path); port 10809 is the NBD
+  # listener that targets connect to from their initramfs.
+  # Persistent state under data/nbdmux; decompressed image files
+  # land under data/nbdmux/images and are bind-mounted read-only
+  # so nbd-server can serve them. Both nbdmux and bty-web write to
+  # that images dir (bty-web decompresses; nbdmux serves), so it is
+  # NOT marked :ro here; the read-only-vs-the-NBD-clients
+  # restriction is enforced by nbd-server's per-export
+  # ``readonly = true`` flag, not by the mount.
+  nbdmux:
+    image: ghcr.io/safl/nbdmux:latest
+    restart: unless-stopped
+    dns:
+      - ${BTY_DNS:-1.1.1.1}
+    ports:
+      - "4040:4040"
+      - "10809:10809"
+    environment:
+      NBDMUX_ADMIN_PASSWORD: ${NBDMUX_ADMIN_PASSWORD:-}
+    volumes:
+      - ${BTY_HOST_DATA_DIR:-./data}/nbdmux:/data
+      - ${BTY_HOST_DATA_DIR:-./data}/nbdmux/images:/images
+
   bty-web:
     image: ghcr.io/safl/bty-web:latest
     restart: unless-stopped
-    # See note on withcache.dns -- same reason.
+    # See note on withcache.dns; same reason.
     dns:
       - ${BTY_DNS:-1.1.1.1}
     ports:
@@ -53,8 +78,14 @@ services:
       # RW (no :ro) so Settings-page edits land back on the host file,
       # matching the Quadlet unit's mount.
       - ./bty.toml:/etc/bty/bty.toml
+      # bty-web decompresses catalog images here on the pre-warm path
+      # for ramboot mode; nbdmux serves them over NBD. Bind the same
+      # host dir under both containers so the bytes path is shared
+      # without a copy.
+      - ${BTY_HOST_DATA_DIR:-./data}/nbdmux/images:/var/lib/bty/live-images
     depends_on:
       - withcache
+      - nbdmux
 
   # TFTP for BIOS/legacy PXE clients: they fetch the small iPXE NBP over udp/69,
   # then chainload bty's HTTP iPXE script and pull kernel / initrd / squashfs

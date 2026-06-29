@@ -2249,6 +2249,48 @@ def test_ui_settings_display_renders_timestamps_in_configured_tz(
     assert "2026-06-25 16:00:00 UTC" not in body
 
 
+def test_ui_settings_ramboot_renders_card_and_form(client: TestClient) -> None:
+    """Settings page carries a Ramboot card anchored at ``#ramboot``,
+    reachable from the subnav, with the nbdmux URL and overlay-size
+    inputs and the post action pointing at the new handler."""
+    _login(client)
+    body = client.get("/ui/settings").text
+    assert 'id="ramboot"' in body
+    assert 'href="#ramboot"' in body
+    assert 'action="/ui/settings/ramboot"' in body
+    assert 'name="nbdmux_url"' in body
+    assert 'name="ramboot_overlay_size"' in body
+    # Default overlay-size surfaces; ramboot remains "unavailable"
+    # until nbdmux is configured.
+    assert "10G" in body
+    assert "ramboot unavailable" in body or "(none" in body
+
+
+def test_ui_settings_ramboot_persists_and_clears(client: TestClient) -> None:
+    """POSTing the form persists both fields; clearing reverts."""
+    _login(client)
+    r = client.post(
+        "/ui/settings/ramboot",
+        data={
+            "nbdmux_url": "http://nbdmux.invalid:4040",
+            "ramboot_overlay_size": "16G",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == "/ui/settings?saved=ramboot#ramboot"
+    body = client.get("/ui/settings").text
+    assert "http://nbdmux.invalid:4040" in body
+    assert "16G" in body
+    # Clearing both reverts the effective view.
+    client.post(
+        "/ui/settings/ramboot",
+        data={"nbdmux_url": "", "ramboot_overlay_size": ""},
+    )
+    body2 = client.get("/ui/settings").text
+    assert "http://nbdmux.invalid:4040" not in body2
+
+
 def test_settings_upstream_override_drives_catalog_fetch_url(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -112,6 +112,7 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "settings.upstream.updated",
     "settings.backup.updated",
     "settings.display.updated",
+    "settings.ramboot.updated",
     "settings.config.updated",
     "settings.config.failed",
     "backup.created",

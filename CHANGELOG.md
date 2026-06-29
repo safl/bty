@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.62.0] - 2026-06-29
+
+### Added
+
+Settings card for the ramboot bytes path. bty's upcoming
+`boot_mode=ramboot` mounts the bound catalog image over NBD via
+the sibling `nbdmux` service so the target box runs the OS in
+place with overlayfs over tmpfs for writes. This release ships
+the operator-facing knobs and the deploy-stack scaffolding: a
+new "Ramboot" card on the Settings page with an `nbdmux URL`
+field plus a default `overlay size` field; matching
+`KEY_NBDMUX_URL` / `KEY_RAMBOOT_OVERLAY_SIZE` resolvers in the
+settings store (resolution order is override, then
+`$BTY_NBDMUX_URL`, then the `[nbdmux] url` field in `bty.toml`,
+then unset); a `settings.ramboot.updated` audit kind; an
+`nbdmux` sidecar in the generated `compose.yml` bound to ports
+4040 (HTTP control plane) and 10809 (NBD listener) with a shared
+images dir so bty-web's pre-warm step can decompress where
+nbdmux serves; a `NBDMUX_ADMIN_PASSWORD` entry in
+`envvars.example`.
+
+Nothing flashes through this path yet. The boot-mode value and
+iPXE template land in the next release; the pre-warm worker and
+the per-machine status badge land in the one after. Without
+those, an operator who configures the nbdmux URL here will see
+the Settings round-trip but no boot dropdown for ramboot.
+
 ## [0.61.2] - 2026-06-29
 
 ### Changed
