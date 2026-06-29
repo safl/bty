@@ -763,6 +763,56 @@ def create_app(
             offer_kind = "ipxe-exit"
             offer_summary = f"{normalised} offered sanboot (iPXE boots local drive {drive})"
             offer_details = {"offer": "sanboot", "sanboot_drive": drive}
+        elif policy == "ramboot":
+            # ramboot chains the slim ``ramboot-init`` live env (kernel
+            # + initrd only, no squashfs). The initramfs nbd-client
+            # connects to the operator-configured nbdmux, mounts the
+            # catalog image's largest partition, overlays a tmpfs for
+            # writes, and pivot_roots before /sbin/init. Gates:
+            #   * nbdmux URL configured in Settings -> Ramboot (or env / bty.toml)
+            #   * ref bound to the machine
+            # Either gate open falls back to ipxe_tui so the operator
+            # sees the misconfiguration in the wizard rather than the
+            # box hard-paniccing in the initramfs.
+            with _db.open_db(state_path) as conn:
+                nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+                overlay_size = _settings_store.resolve_ramboot_overlay_size(conn)
+            if nbdmux_url and ref:
+                # Derive the NBD host from the configured HTTP control
+                # plane URL: same hostname, port 10809 (nbd-server's
+                # listener; bty-web posts exports against port 4040).
+                parsed = urllib.parse.urlsplit(nbdmux_url)
+                nbd_host = parsed.hostname or host.split(":")[0]
+                template = jinja.get_template("ipxe_ramboot.j2")
+                rendered = template.render(
+                    mac=normalised,
+                    machine=machine,
+                    host=host,
+                    nbd_host=nbd_host,
+                    nbd_port=10809,
+                    image_ref=ref,
+                    overlay_size=overlay_size,
+                )
+                offer_kind = "ramboot"
+                offer_summary = (
+                    f"{normalised} offered ramboot via nbd://{nbd_host}:10809/{ref[:8]}..."
+                )
+                offer_details = {
+                    "offer": "ramboot",
+                    "nbd_endpoint": f"tcp://{nbd_host}:10809",
+                    "image_ref": ref,
+                    "overlay_size": overlay_size,
+                }
+            else:
+                template = jinja.get_template("ipxe_tui.j2")
+                rendered = template.render(mac=normalised, machine=machine, host=host)
+                offer_kind = "ramboot-fallback-tui"
+                reason = "nbdmux URL not configured" if not nbdmux_url else "no bty_image_ref bound"
+                offer_summary = f"{normalised} offered tui (boot_mode=ramboot but {reason})"
+                offer_details = {
+                    "offer": "bty-tui",
+                    "reason": f"ramboot misconfigured: {reason}",
+                }
         elif ref and policy in ("bty-flash-always", "bty-flash-once"):
             # Safety gate: refuse the flash chain unless the operator
             # has picked a target disk by serial. Without this, ``bty``

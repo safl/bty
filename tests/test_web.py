@@ -1337,6 +1337,76 @@ def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> No
     assert "kernel" not in body
 
 
+def test_pxe_ramboot_emits_ramboot_template_when_configured(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``boot_mode=ramboot`` + nbdmux URL set + ref bound emits the
+    ramboot iPXE template with the bty.* params the initramfs
+    consumes (nbd endpoint, image ref, overlay size)."""
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    # Bind a ref via the catalog path so the machine record has a ref;
+    # any non-empty bty_image_ref works for the template-emission test.
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ab",
+        json={
+            "boot_mode": "ramboot",
+            "bty_image_ref": "a" * 64,
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ab")
+    assert r.status_code == 200
+    body = r.text
+    assert "boot=ramboot" in body
+    assert "bty.nbd=tcp://nbdmux.invalid:10809" in body
+    assert "bty.image=" + "a" * 64 in body
+    assert "bty.overlay_size=10G" in body
+    assert "bty-ramboot-init-x86_64-v" in body
+    # NOT the bty-tui fallback.
+    assert "bty.server=" in body  # ramboot template does carry server
+    assert "boot=live" not in body
+
+
+def test_pxe_ramboot_falls_back_to_tui_when_nbdmux_unset(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No nbdmux URL configured -> the iPXE chain falls back to
+    ipxe_tui so the operator picks an image manually rather than
+    the box hard-paniccing on a missing NBD server."""
+    monkeypatch.delenv("BTY_NBDMUX_URL", raising=False)
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ac",
+        json={
+            "boot_mode": "ramboot",
+            "bty_image_ref": "b" * 64,
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ac")
+    assert r.status_code == 200
+    body = r.text
+    assert "boot=ramboot" not in body
+    # ipxe_tui chain points at the bty-tui live env.
+    assert "boot=live" in body
+
+
+def test_pxe_ramboot_falls_back_to_tui_without_ref(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nbdmux URL set but no ref bound -> ipxe_tui fallback (same
+    visibility shape as the unset-URL case)."""
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ad",
+        json={"boot_mode": "ramboot"},
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ad")
+    assert r.status_code == 200
+    assert "boot=ramboot" not in r.text
+    assert "boot=live" in r.text
+
+
 def test_pxe_sanboot_mode_uses_per_machine_drive_override(app_client: TestClient) -> None:
     """``sanboot_drive`` overrides the default 0x80 so multi-disk
     boxes can point iPXE at the right BIOS drive."""
