@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.61.2] - 2026-06-29
+
+### Changed
+
+- **Default catalog URL tracks nosi's `/releases/latest/`.** The
+  built-in `DEFAULT_CATALOG_URL` was pinned to a specific
+  `2026.W<NN>` nosi release at bty release time so two operators
+  on the same bty version saw byte-identical catalog content.
+  Now that withcache (since v0.59.0) provides URL-keyed byte
+  stability -- once an operator's cache holds a catalog blob,
+  every subsequent fetch resolves to the same bytes until the
+  operator evicts the cache entry -- the bty-side pin became
+  redundant *and* drifted the moment a bty release wasn't cut.
+  The default reverts to
+  `https://github.com/safl/nosi/releases/latest/download/catalog.toml`.
+  Operators who want a hard pin (production deploys; reproducible
+  across cache evictions) paste a week-tagged URL into
+  Settings -> Catalog.
+
+  The Settings card's explanatory call-out updates to match: the
+  default is described as "tracks latest" with two opt-out
+  recipes (pinned-week tag, rolling oras `:latest` refs) instead
+  of the previous three-option layout that treated the W-pinned
+  default as the canonical choice.
+
 ## [0.61.1] - 2026-06-29
 
 ### Added
