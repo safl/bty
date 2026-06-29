@@ -48,6 +48,16 @@
         <span class="badge bg-dark" title="boot the local disk: UEFI hands back to firmware, BIOS sanboots the drive"><i class="bi bi-hdd-fill me-1"></i>{{ m.boot_mode }}</span>
         {% elif m.boot_mode == 'ramboot' %}
         <span class="badge bg-success" title="boot the catalog image over NBD with overlayfs over tmpfs (disk never touched)"><i class="bi bi-hdd-network me-1"></i>{{ m.boot_mode }}</span>
+        {% set _rb = (ramboot_status_by_ref or {}).get(m.bty_image_ref) %}
+        {% if _rb == 'ready' %}
+        <div><small class="badge bg-success-subtle text-success border border-success-subtle" title="ramboot bytes are registered with nbdmux">ready</small></div>
+        {% elif _rb == 'failed' %}
+        <div><small class="badge bg-danger-subtle text-danger border border-danger-subtle" title="pre-warm failed; see Events for the reason">failed</small></div>
+        {% elif _rb %}
+        <div><small class="badge bg-info-subtle text-info border border-info-subtle" title="ramboot pre-warm in progress">{{ _rb }}</small></div>
+        {% elif m.bty_image_ref %}
+        <div><small class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" title="binding has no pre-warm row yet; the worker will start one">not pre-warmed</small></div>
+        {% endif %}
         {% else %}
         <span class="badge bg-secondary" title="unrecognised boot mode (stale record)"><i class="bi bi-hdd me-1"></i>{{ m.boot_mode }}</span>
         {% endif %}

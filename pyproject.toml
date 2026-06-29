@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.63.0"
+version = "0.64.0"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,12 @@ dependencies = [
     # resolution. bty previously vendored its own ``bty.oras``; that
     # module was moved upstream in withcache 0.6.0.
     "withcache>=0.6.0",
+    # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
+    # serves catalog images over the network for ``boot_mode=ramboot``.
+    # bty calls ``nbdmux.client`` from the pre-warm worker to register
+    # decompressed images as named exports; the daemon serves them on
+    # port 10809 to the ramboot-init initramfs over NBD.
+    "nbdmux>=0.1.2",
 ]
 
 [project.optional-dependencies]
@@ -119,7 +125,7 @@ mypy_path = "src"
 # complaint here rather than scatter ``# type: ignore`` across every
 # import site; revisit when withcache ships the marker upstream.
 [[tool.mypy.overrides]]
-module = ["withcache", "withcache.oras"]
+module = ["withcache", "withcache.oras", "nbdmux", "nbdmux.client"]
 ignore_missing_imports = true
 
 [tool.pyright]
