@@ -58,7 +58,7 @@ services:
       - "4040:4040"
       - "10809:10809"
     environment:
-      NBDMUX_ADMIN_PASSWORD: ${NBDMUX_ADMIN_PASSWORD:-}
+      NBDMUX_ADMIN_PASSWORD: ${NBDMUX_ADMIN_PASSWORD:?set in envvars}
     volumes:
       - ${BTY_HOST_DATA_DIR:-./data}/nbdmux:/data
       - ${BTY_HOST_DATA_DIR:-./data}/nbdmux/images:/images

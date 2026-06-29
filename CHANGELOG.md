@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.64.1] - 2026-06-30
+
+### Changed
+
+Symmetrised the ramboot bytes path with the withcache path so a
+fresh `bty-lab init` brings ramboot up with no operator typing.
+The generated `bty.toml` now auto-fills `[nbdmux] url =
+"http://<host_addr>:4040"` matching the existing
+`[withcache] url` shape, and `NBDMUX_ADMIN_PASSWORD` is now a
+required-with-default field in the envvars template instead of
+optional. The compose entry was also updated to fail-loud on a
+missing `NBDMUX_ADMIN_PASSWORD` (the `?set in envvars` form
+already used for `WITHCACHE_ADMIN_PASSWORD`) so an envvars file
+wiped of credentials doesn't silently come up with an
+unauthenticated nbdmux UI.
+
+Net effect for the operator: after a clean `uvx bty-lab init`
+plus `cp envvars.example envvars && podman compose up -d`, the
+only ramboot-specific step left is binding a machine to
+`boot_mode=ramboot`. The "set the nbdmux URL in Settings" and
+"set the password" steps are gone for the default deploy.
+
 ## [0.64.0] - 2026-06-30
 
 ### Added

@@ -118,6 +118,7 @@ def test_envvars_example_documents_bty_dns(tmp_path: Path) -> None:
     live = deploy_mod._render_envvars_filled(
         host_addr="10.0.0.5",
         withcache_pw="bty",
+        nbdmux_pw="bty",
         admin_pw="bty",
         session_secret="x" * 32,
         data_dir_abs="/opt/bty/data",
