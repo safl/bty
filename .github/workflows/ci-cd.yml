@@ -247,11 +247,11 @@ jobs:
     name: Build ${{ matrix.variant }} image
     needs: test
     runs-on: ubuntu-latest
-    # The netboot-pc live build finishes in <30 min. The failure mode is a
-    # HANG, not slowness (the in-VM apt / git clone / pip steps have no
-    # timeout), so a 45 min cap fails a stuck build fast; the ``cijoe-output``
-    # artifact (uploaded below, if: always()) carries the captured console +
-    # report.html for the post-mortem.
+    # The netboot-pc / ramboot-init live builds finish in <30 min each. The
+    # failure mode is a HANG, not slowness (the in-VM apt / git clone / pip
+    # steps have no timeout), so a 45 min cap fails a stuck build fast; the
+    # ``cijoe-output`` artifact (uploaded below, if: always()) carries the
+    # captured console + report.html for the post-mortem.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -261,6 +261,8 @@ jobs:
         # ``test-usb-grow`` can fire as soon as the .iso is built.
         include:
           - variant: netboot-pc
+            kind: live
+          - variant: ramboot-init
             kind: live
     steps:
       - uses: actions/checkout@v6
@@ -348,6 +350,19 @@ jobs:
             ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.initrd
             ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.squashfs
             ~/system_imaging/disk/bty-netboot-pc-x86_64-v*.sha256
+
+      - name: Upload artifact (ramboot-init variant)
+        # ramboot-init publishes only the kernel + initrd pair; the
+        # squashfs lb still builds is intentionally dropped at publish
+        # time (see cijoe/scripts/ramboot_init_build.py for the why).
+        if: matrix.variant == 'ramboot-init'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bty-ramboot-init-x86_64
+          path: |
+            ~/system_imaging/disk/bty-ramboot-init-x86_64-v*.vmlinuz
+            ~/system_imaging/disk/bty-ramboot-init-x86_64-v*.initrd
+            ~/system_imaging/disk/bty-ramboot-init-x86_64-v*.sha256
 
   # ---------------- usbboot-pc (split out for early test-usb-grow gate) -------
   # Same content as the matrix's previous ``usbboot-pc`` entry but as a

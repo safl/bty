@@ -1,0 +1,142 @@
+# initramfs-tools boot driver -- sourced by ``/init`` when the kernel
+# cmdline carries ``boot=ramboot``. Defines ``mountroot`` (the
+# contract initramfs-tools' /init calls to populate ``/root`` before
+# pivoting + ``exec /sbin/init``).
+#
+# Sequence inside mountroot():
+#
+#   1. Parse ``bty.*`` cmdline params -- nbd endpoint, image
+#      export name, overlay size, server URL, MAC.
+#   2. modprobe nbd + overlay.
+#   3. nbd-client connects to nbdmux; ``/dev/nbd0`` appears.
+#   4. partx scans /dev/nbd0; pick the largest partition as the
+#      root (good-enough heuristic for nosi disk images; can be
+#      overridden via ``bty.root_part=<devnode>``).
+#   5. mount root read-only at /lower.
+#   6. mount tmpfs (size = bty.overlay_size, default 10G) at /upper.
+#   7. overlayfs(lower=/lower, upper=/upper/up, work=/upper/work)
+#      at ``/root`` (the path initramfs-tools' /init will
+#      ``pivot_root`` into).
+#   8. Best-effort POST status to bty.server so the machine's
+#      timeline reflects "ramboot up" before pivot_root.
+#
+# Failure handling: on any unrecoverable step we drop to a
+# ``panic`` (initramfs-tools' single-shell recovery) with the
+# reason. The operator sees the message on tty/serial.
+
+# shellcheck disable=SC2034
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+# initramfs-tools' standard library (provides ``log_begin_msg``,
+# ``log_end_msg``, ``panic``, etc.)
+# shellcheck disable=SC1091
+. /scripts/functions
+
+_get_cmdline() {
+    # ``$1`` is the parameter name (without ``=``). Reads /proc/cmdline
+    # and prints just the value, or empty if the parameter is absent.
+    sed -n "s/.*\\<$1=\\([^ ]*\\).*/\\1/p" /proc/cmdline
+}
+
+_post_status() {
+    # Best-effort POST. ``$1`` = status string. Silent on failure;
+    # the boot continues regardless.
+    server="$(_get_cmdline bty.server)"
+    mac="$(_get_cmdline bty.mac)"
+    [ -n "$server" ] && [ -n "$mac" ] || return 0
+    # busybox-static's ``wget`` does plain HTTP POST when we use
+    # ``--post-data``; the body is irrelevant to bty (server reads
+    # ``status`` from a query param shape historically). For the
+    # ramboot variant we just touch the endpoint -- the URL alone
+    # carries the signal.
+    /bin/busybox wget -q -O /dev/null \
+        --post-data="status=$1" \
+        "${server}/pxe/${mac}/status" || true
+}
+
+mountroot() {
+    nbd_url="$(_get_cmdline bty.nbd)"
+    image="$(_get_cmdline bty.image)"
+    overlay_size="$(_get_cmdline bty.overlay_size)"
+    root_part_override="$(_get_cmdline bty.root_part)"
+
+    # Defaults: 10 GiB tmpfs is enough for typical CI workloads
+    # writing logs + scratch state; operator caps with bty.overlay_size.
+    : "${overlay_size:=10G}"
+
+    if [ -z "$nbd_url" ] || [ -z "$image" ]; then
+        panic "ramboot: missing bty.nbd or bty.image on kernel cmdline"
+    fi
+
+    # nbd_url is ``tcp://<host>:<port>``. Strip the scheme and split.
+    nbd_host="${nbd_url#tcp://}"
+    nbd_host="${nbd_host%%:*}"
+    nbd_port="${nbd_url##*:}"
+
+    log_begin_msg "ramboot: modprobe nbd + overlay"
+    modprobe nbd nbds_max=1 || panic "ramboot: modprobe nbd failed"
+    modprobe overlay || panic "ramboot: modprobe overlay failed"
+    log_end_msg
+
+    log_begin_msg "ramboot: nbd-client ${nbd_host}:${nbd_port} -name ${image}"
+    if ! nbd-client "$nbd_host" "$nbd_port" -name "$image" /dev/nbd0; then
+        _post_status "ramboot.nbd_connect_failed"
+        panic "ramboot: nbd-client failed to connect to ${nbd_host}:${nbd_port}"
+    fi
+    log_end_msg
+
+    # Settle: nbd's BLKRRPART needs a beat for the partition device
+    # nodes to appear in /dev.
+    udevadm settle --timeout=10 || true
+    /bin/busybox partprobe /dev/nbd0 2>/dev/null || true
+    udevadm settle --timeout=10 || true
+
+    # Pick root partition: explicit override > largest partition.
+    if [ -n "$root_part_override" ]; then
+        root_part="$root_part_override"
+    else
+        root_part="$(
+            /bin/busybox find /dev -maxdepth 1 -name 'nbd0p*' -print0 \
+            | xargs -0 -I{} /bin/busybox sh -c 'echo "$(blockdev --getsize64 "$1") $1"' _ {} \
+            | sort -n | tail -1 | cut -d' ' -f2
+        )"
+    fi
+    if [ -z "$root_part" ] || [ ! -e "$root_part" ]; then
+        _post_status "ramboot.no_root_partition"
+        panic "ramboot: could not pick a root partition on /dev/nbd0"
+    fi
+
+    mkdir -p /lower /upper /root
+    log_begin_msg "ramboot: mounting ${root_part} ro at /lower"
+    if ! mount -o ro "$root_part" /lower; then
+        _post_status "ramboot.mount_root_failed"
+        panic "ramboot: failed to mount ${root_part}"
+    fi
+    log_end_msg
+
+    log_begin_msg "ramboot: tmpfs(${overlay_size}) at /upper"
+    if ! mount -t tmpfs -o "size=${overlay_size}" tmpfs /upper; then
+        _post_status "ramboot.mount_tmpfs_failed"
+        panic "ramboot: failed to mount tmpfs at /upper"
+    fi
+    mkdir -p /upper/up /upper/work
+    log_end_msg
+
+    log_begin_msg "ramboot: overlayfs at /root"
+    if ! mount -t overlay overlay \
+        -o "lowerdir=/lower,upperdir=/upper/up,workdir=/upper/work" \
+        /root
+    then
+        _post_status "ramboot.mount_overlay_failed"
+        panic "ramboot: failed to mount overlayfs at /root"
+    fi
+    log_end_msg
+
+    _post_status "ramboot.up"
+    # initramfs-tools' /init pivot_root's into /root and exec's
+    # /sbin/init from here.
+}

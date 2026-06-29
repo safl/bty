@@ -19,6 +19,8 @@ VARIANT ?= usbboot-pc
 #    supported.
 ifeq ($(VARIANT),netboot-pc)
 MEDIA_TASK := tasks/netboot-pc.yaml
+else ifeq ($(VARIANT),ramboot-init)
+MEDIA_TASK := tasks/ramboot-init.yaml
 else ifeq ($(VARIANT),usbboot-rpi)
 MEDIA_TASK := tasks/usbboot-rpi.yaml
 else
@@ -59,9 +61,10 @@ help:
 	@echo "                  (needs QEMU + KVM; ~5-10 min wall clock)"
 	@echo ""
 	@echo "Variant: $(VARIANT)  (override with VARIANT=netboot-pc, ...)"
-	@echo "  usbboot-pc   - bootable USB live ISO via live-build (.iso, x86_64)"
-	@echo "  netboot-pc   - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
-	@echo "  usbboot-rpi  - Raspberry-Pi USB-bootable flasher (.img.gz, arm64; CM5/Pi5/Pi4)"
+	@echo "  usbboot-pc    - bootable USB live ISO via live-build (.iso, x86_64)"
+	@echo "  netboot-pc    - kernel + initrd + squashfs trio for PXE-flash clients (x86_64)"
+	@echo "  ramboot-init  - kernel + slim initrd for bty-web's ramboot boot mode (x86_64)"
+	@echo "  usbboot-rpi   - Raspberry-Pi USB-bootable flasher (.img.gz, arm64; CM5/Pi5/Pi4)"
 	@echo ""
 	@echo "Docker (trial / image-library bty-web container):"
 	@echo "  docker-build  uv build + docker build -> bty-web:dev (single-arch, local)"
