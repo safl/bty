@@ -100,10 +100,10 @@ def _compose_up(dest: Path) -> None:
             capture_output=True,
         )
     except subprocess.CalledProcessError as exc:
+        out = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
+        err = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
         raise AssertionError(
-            f"compose up failed (rc={exc.returncode})\n"
-            f"--- stdout ---\n{exc.stdout.decode('replace') if exc.stdout else ''}\n"
-            f"--- stderr ---\n{exc.stderr.decode('replace') if exc.stderr else ''}"
+            f"compose up failed (rc={exc.returncode})\n--- stdout ---\n{out}\n--- stderr ---\n{err}"
         ) from exc
 
 
