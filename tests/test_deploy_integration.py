@@ -60,7 +60,10 @@ def _port_in_use(port: int) -> bool:
 def _wait_healthz(port: int, path: str = "/healthz") -> None:
     """Poll the given port + path for HTTP 200; raises after
     HEALTHZ_TIMEOUT. The port is the host-side bind from the
-    compose entry, hit on 127.0.0.1."""
+    compose entry, hit on 127.0.0.1. On timeout, dump every
+    running container's name + status + tail of logs so the CI
+    failure surfaces WHY the service didn't come up, not just
+    that it didn't answer."""
     import urllib.error
     import urllib.request
 
@@ -76,7 +79,30 @@ def _wait_healthz(port: int, path: str = "/healthz") -> None:
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             last_err = str(exc)
         time.sleep(1.0)
-    raise AssertionError(f"healthz timeout: {url}: {last_err}")
+    raise AssertionError(f"healthz timeout: {url}: {last_err}\n\n{_container_diagnostics()}")
+
+
+def _container_diagnostics() -> str:
+    """Snapshot of every podman container + its log tail for the
+    failure message."""
+    lines = ["--- podman ps -a ---"]
+    ps = subprocess.run(
+        ["podman", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    lines.append(ps.stdout.strip() or "(empty)")
+    for name in [ln.split("\t", 1)[0] for ln in ps.stdout.strip().splitlines() if ln]:
+        log = subprocess.run(
+            ["podman", "logs", "--tail", "30", name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        body = log.stdout.strip() or log.stderr.strip()
+        lines.append(f"\n--- logs {name} (tail 30) ---\n{body}")
+    return "\n".join(lines)
 
 
 def _compose_cmd() -> list[str]:
