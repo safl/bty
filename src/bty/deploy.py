@@ -1134,6 +1134,20 @@ def init_main(argv: list[str] | None = None, *, prog: str = "bty-lab init") -> N
     for p in written:
         print(f"  {p.relative_to(dest.parent) if dest.parent != Path() else p}", file=sys.stderr)
 
+    # Pre-create the bind-mount targets (data/{withcache,bty,nbdmux,
+    # nbdmux/images}) so the operator's first ``podman compose up`` lands
+    # on dirs that exist. Without this step podman refuses with
+    # ``statfs: no such file or directory`` because it won't auto-create
+    # a host path it's asked to bind-mount. ``deploy`` already did this;
+    # the asymmetry with ``init`` was a real outage (see v0.65.1 and
+    # v0.65.2 entries in CHANGELOG).
+    prepared = _prepare_data_dirs(data_dir_abs)
+    for p in prepared:
+        print(
+            f"  {p.relative_to(dest.parent) if dest.parent != Path() else p}/",
+            file=sys.stderr,
+        )
+
     # Compose-backend probe. `podman compose` shells out to podman-compose
     # (or docker-compose). When neither is on PATH the operator hits a
     # cryptic "looking up compose provider failed" later -- surface it
