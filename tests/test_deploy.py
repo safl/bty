@@ -148,11 +148,13 @@ def test_env_example_has_required_keys(tmp_path: Path) -> None:
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest)])
     body = (dest / "envvars.example").read_text(encoding="utf-8")
-    # Required (uncommented):
+    # Required (uncommented). v0.64.2 unified the three sidecar
+    # passwords onto a single ``bty-lab`` default; BTY_ADMIN_PASSWORD
+    # is no longer the commented odd-one-out.
     assert "\nHOST_ADDR=" in body
-    assert "\nWITHCACHE_ADMIN_PASSWORD=" in body
-    # Strongly recommended (commented; operator opts in):
-    assert "# BTY_ADMIN_PASSWORD=" in body
+    assert "\nBTY_ADMIN_PASSWORD=bty-lab" in body
+    assert "\nWITHCACHE_ADMIN_PASSWORD=bty-lab" in body
+    assert "\nNBDMUX_ADMIN_PASSWORD=bty-lab" in body
     # Common (commented):
     assert "# BTY_HOST_DATA_DIR=" in body
     # Advanced knobs are documented so operators don't have to chase
@@ -268,11 +270,13 @@ def test_deploy_bakes_password_into_withcache_quadlet(
 def test_init_withcache_quadlet_keeps_placeholder(tmp_path: Path) -> None:
     """The stand-alone `init --systemd` reference path has no chosen
     password, so its withcache unit keeps the editable placeholder +
-    the "edit before installing" note."""
+    the "edit before installing" note. v0.64.2 unified the placeholder
+    onto ``bty-lab`` (same value as DEFAULT_DEPLOY_PASSWORD) so all
+    three sidecars share one default."""
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest), "--systemd"])
     withcache = (dest / "quadlet" / "withcache.container").read_text(encoding="utf-8")
-    assert "Environment=WITHCACHE_ADMIN_PASSWORD=change-me" in withcache
+    assert f"Environment=WITHCACHE_ADMIN_PASSWORD={deploy_mod._PLACEHOLDER_PASSWORD}" in withcache
     assert "Edit Environment=WITHCACHE_ADMIN_PASSWORD before installing." in withcache
 
 
