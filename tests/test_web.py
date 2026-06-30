@@ -1337,36 +1337,30 @@ def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> No
     assert "kernel" not in body
 
 
-def _seed_ramboot_ready(state_path: Path, ref: str) -> None:
-    """Mark a ref as pre-warmed in ``ramboot_cache`` so iPXE-side
-    tests can assert the ramboot template emission without
-    standing up a real nbdmux + a real fetch worker."""
-    import sqlite3
-    from datetime import UTC, datetime
+def _mock_nbdmux_ready(monkeypatch: pytest.MonkeyPatch, ref: str) -> None:
+    """Replace ``nbdmux.client.list_exports`` with a stub that
+    returns ``ref`` at ``status='ready'``. The bty-side iPXE branch
+    queries nbdmux to decide readiness (since v0.65.0; the local
+    ramboot_cache table is gone)."""
+    from nbdmux import client as nbdmux_client
 
-    now = datetime.now(UTC).isoformat()
-    with sqlite3.connect(state_path) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO ramboot_cache "
-            "(ref, status, image_path, export_name, decompressed_size, "
-            "enqueued_at, started_at, completed_at, updated_at) "
-            "VALUES (?, 'ready', ?, ?, ?, ?, ?, ?, ?)",
-            (ref, f"/tmp/{ref}.img", ref, 1024, now, now, now, now),
-        )
+    def _fake(server: str, timeout: float = 2.0) -> list[dict[str, object]]:
+        del server, timeout
+        return [{"name": ref, "status": "ready"}]
+
+    monkeypatch.setattr(nbdmux_client, "list_exports", _fake)
 
 
 def test_pxe_ramboot_emits_ramboot_template_when_configured(
-    app_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``boot_mode=ramboot`` + nbdmux URL set + ref bound + cache.ready
-    emits the ramboot iPXE template with the bty.* params the
-    initramfs consumes (nbd endpoint, image ref, overlay size)."""
+    """``boot_mode=ramboot`` + nbdmux URL set + ref bound + nbdmux
+    reports the export ready emits the ramboot iPXE template with
+    the bty.* params the initramfs consumes (nbd endpoint, image
+    ref, overlay size)."""
     monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
     ref = "a" * 64
-    # Seed the ramboot_cache row ahead of the PUT so the upsert's
-    # idempotent enqueue is a no-op and the worker doesn't try to
-    # fetch a fictional source URL.
-    _seed_ramboot_ready(tmp_path / "state.db", ref)
+    _mock_nbdmux_ready(monkeypatch, ref)
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ab",
         json={
@@ -1387,13 +1381,21 @@ def test_pxe_ramboot_emits_ramboot_template_when_configured(
     assert "boot=live" not in body
 
 
-def test_pxe_ramboot_falls_back_to_tui_when_not_pre_warmed(
+def test_ramboot_bind_rejected_when_ref_not_in_nbdmux(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """nbdmux URL + ref bound but ramboot_cache.status != 'ready'
-    -> ipxe_tui fallback (don't chain into a half-baked ramboot)."""
+    """boot_mode=ramboot bind with a ref that isn't registered with
+    nbdmux at status='ready' is rejected at form-submit time (since
+    v0.65.0; nbdmux owns the warming pipeline and bty validates).
+    The operator gets a 422 with a helpful message instead of a
+    half-configured machine record that would fail at PXE chain
+    time."""
     monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
-    app_client.put(
+    # Mock returns empty -> the ref isn't registered.
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setattr(nbdmux_client, "list_exports", lambda server, timeout=2.0: [])
+    r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ae",
         json={
             "boot_mode": "ramboot",
@@ -1401,21 +1403,18 @@ def test_pxe_ramboot_falls_back_to_tui_when_not_pre_warmed(
         },
         cookies=AUTH,
     )
-    # No seed -> ramboot_cache row is either absent or queued.
-    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ae")
-    assert r.status_code == 200
-    assert "boot=ramboot" not in r.text
-    assert "boot=live" in r.text
+    assert r.status_code == 422
+    assert "ramboot" in r.text.lower()
 
 
-def test_pxe_ramboot_falls_back_to_tui_when_nbdmux_unset(
+def test_ramboot_bind_rejected_when_nbdmux_unset(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No nbdmux URL configured -> the iPXE chain falls back to
-    ipxe_tui so the operator picks an image manually rather than
-    the box hard-paniccing on a missing NBD server."""
+    """No nbdmux URL configured + boot_mode=ramboot with a ref
+    -> 422 at bind time. The bind-time gate refuses to record a
+    machine that PXE-boot would fall back from anyway."""
     monkeypatch.delenv("BTY_NBDMUX_URL", raising=False)
-    app_client.put(
+    r = app_client.put(
         "/machines/aa:bb:cc:dd:ee:ac",
         json={
             "boot_mode": "ramboot",
@@ -1423,19 +1422,16 @@ def test_pxe_ramboot_falls_back_to_tui_when_nbdmux_unset(
         },
         cookies=AUTH,
     )
-    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ac")
-    assert r.status_code == 200
-    body = r.text
-    assert "boot=ramboot" not in body
-    # ipxe_tui chain points at the bty-tui live env.
-    assert "boot=live" in body
+    assert r.status_code == 422
+    assert "nbdmux URL not configured" in r.text
 
 
 def test_pxe_ramboot_falls_back_to_tui_without_ref(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """nbdmux URL set but no ref bound -> ipxe_tui fallback (same
-    visibility shape as the unset-URL case)."""
+    """boot_mode=ramboot without a ref escapes the bind-time gate
+    (which only triggers when both are set) and falls back to
+    ipxe_tui at PXE chain time."""
     monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ad",
@@ -1443,6 +1439,38 @@ def test_pxe_ramboot_falls_back_to_tui_without_ref(
         cookies=AUTH,
     )
     r = app_client.get("/pxe/aa:bb:cc:dd:ee:ad")
+    assert r.status_code == 200
+    assert "boot=ramboot" not in r.text
+    assert "boot=live" in r.text
+
+
+def test_pxe_ramboot_falls_back_when_export_drops_post_bind(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defense-in-depth: machine was bound while the ref WAS in
+    nbdmux's ready list, but the export got removed between bind
+    and PXE chain. The chain-time check sees the ref absent and
+    falls back to ipxe_tui rather than chaining into a missing
+    export."""
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    ref = "f" * 64
+    from nbdmux import client as nbdmux_client
+
+    # Bind: nbdmux reports ready.
+    monkeypatch.setattr(
+        nbdmux_client,
+        "list_exports",
+        lambda server, timeout=2.0: [{"name": ref, "status": "ready"}],
+    )
+    r = app_client.put(
+        "/machines/aa:bb:cc:dd:ee:af",
+        json={"boot_mode": "ramboot", "bty_image_ref": ref},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+    # Now nbdmux's export disappeared.
+    monkeypatch.setattr(nbdmux_client, "list_exports", lambda server, timeout=2.0: [])
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:af")
     assert r.status_code == 200
     assert "boot=ramboot" not in r.text
     assert "boot=live" in r.text

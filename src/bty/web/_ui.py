@@ -42,7 +42,6 @@ from bty.web import (
     _db,
     _events_log,
     _labels,
-    _ramboot_cache,
     _releases,
     _settings_store,
     _sysconfig,
@@ -467,10 +466,25 @@ def register_ui_routes(
             machine_events = _events_log.list_events(
                 conn, subject_kind="machine", limit=_events_log.RECENT_EVENTS_LIMIT
             )
-            # Per-row ramboot pre-warm status. One lookup; the row
-            # template renders the status pill under the boot-mode
-            # badge when boot_mode=ramboot.
-            ramboot_status_by_ref = _ramboot_cache.statuses_by_ref(conn)
+            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+        # Per-row ramboot status: query nbdmux's /exports once per
+        # page render. Since v0.65.0 the warming pipeline lives in
+        # nbdmux (no local cache table); the row template renders
+        # the resulting status pill under the boot-mode badge when
+        # boot_mode=ramboot.
+        ramboot_status_by_ref: dict[str, str] = {}
+        if nbdmux_url:
+            try:
+                from nbdmux import client as nbdmux_client
+
+                exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
+                ramboot_status_by_ref = {
+                    str(e.get("name")): str(e.get("status") or "") for e in exports if e.get("name")
+                }
+            except Exception:
+                # Daemon unreachable / network blip; the page still
+                # renders, just without the per-row pill.
+                ramboot_status_by_ref = {}
         machines = [_row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
         # from ``POST /ui/machines/{mac}/delete`` so the operator gets a

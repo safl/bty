@@ -247,34 +247,6 @@ CREATE TABLE IF NOT EXISTS bty_version (
     version  TEXT NOT NULL PRIMARY KEY
 );
 
--- Per-image pre-warm state for ``boot_mode=ramboot``. One row per
--- bty_image_ref the operator has bound to a ramboot machine; rows
--- persist across reboots so machines rebound to the same image
--- skip the decompress + register cycle. ``status`` is the
--- worker-set state machine: ``queued`` (enqueued, worker not yet
--- started), ``fetching`` (downloading from withcache / origin),
--- ``decompressing``, ``registering`` (POSTing to nbdmux),
--- ``ready`` (registered and the export name in ``export_name``
--- matches the ref), ``failed`` (error in ``error`` column;
--- worker won't auto-retry, operator re-enqueues from the UI).
--- ``image_path`` is the absolute path on the bty-web container's
--- filesystem (typically under /var/lib/bty/live-images/); the
--- same dir is bind-mounted into the nbdmux sidecar so the bytes
--- are shared without a copy.
-CREATE TABLE IF NOT EXISTS ramboot_cache (
-    -- bty_image_ref (sha256 of canonical src URL); 64 lower-case hex
-    ref                TEXT PRIMARY KEY,
-    -- queued | fetching | decompressing | registering | ready | failed
-    status             TEXT NOT NULL,
-    image_path         TEXT,        -- abs path to the decompressed .img
-    export_name        TEXT,        -- nbdmux export name (== ref by convention)
-    decompressed_size  INTEGER,     -- bytes; for the UI display
-    error              TEXT,        -- error message when status=failed
-    enqueued_at        TEXT NOT NULL,
-    started_at         TEXT,
-    completed_at       TEXT,
-    updated_at         TEXT NOT NULL
-);
 """
 
 

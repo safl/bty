@@ -67,27 +67,58 @@ The card carries two fields:
 The values resolve as Settings override first, then `$BTY_NBDMUX_URL`
 env, then the `[nbdmux] url` field in `bty.toml`, then unset.
 
+## Warm an image in nbdmux first
+
+Since v0.65.0 the warming pipeline (fetch + decompress + register
+the export) lives in **nbdmux**, not bty-web. Operators populate
+nbdmux directly; bty-web only validates that a ref is ready before
+letting the operator bind a machine to it.
+
+Open the nbdmux dashboard at `http://<host>:4040/` and POST a warm
+request. The simplest path is from a shell on the host:
+
+```bash
+curl -X POST http://<host>:4040/exports \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "<bty_image_ref>",
+    "src_url": "<catalog-entry-src>",
+    "readonly": true
+  }'
+```
+
+`<bty_image_ref>` is the catalog entry's ref (visible in bty-web's
+catalog table or `/images`). `<catalog-entry-src>` is the upstream
+URL (`oras://...` or `https://.../...img.gz`); copy it from the same
+row. nbdmux routes the fetch through the configured
+`NBDMUX_WITHCACHE_URL` (set by `bty-lab init` to the in-stack
+`http://withcache:3000`), so the bytes flow through the same LAN
+cache as the flash path.
+
+The nbdmux dashboard shows the state machine progressing
+`queued -> fetching -> decompressing -> ready` with a percent-
+complete bar. Once `ready` the export is live on nbdmux's NBD
+listener (port 10809 by default).
+
 ## Bind a machine to ramboot
 
-Open the machine's edit page and:
+With the ref ready in nbdmux, open the machine's edit page in
+bty-web and:
 
-1. Pick a catalog entry under "Image binding". Same field used for
-   `bty-flash-always` / `bty-flash-once`.
+1. Pick the same catalog entry under "Image binding".
 2. Set "Boot mode" to **ramboot**.
 3. Save.
 
-bty-web reacts immediately: it inserts a `ramboot_cache` row for the
-ref in `status=queued` and the in-process pre-warm worker picks it
-up. The state progresses
-`queued -> fetching -> decompressing -> registering -> ready`. The
-machine row shows a small pill under the ramboot boot-mode badge so
-you can watch progress without opening Events.
+bty-web validates the binding at save time: it queries nbdmux's
+`/exports`, finds the ref at `status='ready'`, and persists the
+machine record. If the ref isn't in nbdmux's ready list (or nbdmux
+is unreachable), the form rejects with a 422 plus an explanatory
+message; warm the export in nbdmux first, then re-save the machine.
 
-The pre-warm pulls the bound image through withcache when configured
-(no second copy on disk), decompresses into
-`<state_dir>/live-images/<ref>.img`, and POSTs the path to nbdmux's
-`/exports` endpoint as a named export. Once `ready`, the bytes path
-is live for any machine bound to the same ref.
+The machine row's small pill under the ramboot badge mirrors
+nbdmux's status. The pill is read live from nbdmux's API on each
+page render, so it reflects the current daemon state with no local
+cache table.
 
 ## Boot the target
 
@@ -153,11 +184,12 @@ to `bty.server` before panicking, so the failure surfaces on
 `/ui/events` for the operator timeline even if you don't have a
 serial console attached.
 
-If the pre-warm worker itself fails (catalog entry missing, source
-URL 404, decompress error), the `ramboot_cache` row goes to
-`status=failed` with the error in the row's `error` column, surfaced
-on `/ui/events` as `ramboot.pre_warm.failed`. Save the machine
-binding again to re-enqueue at `queued`.
+If nbdmux's warmer itself fails (upstream URL 404, decompress error,
+withcache unreachable), the export's status moves to `failed` on
+nbdmux's dashboard with the error message in the row's `error`
+field. The bty-side machine row mirrors the `failed` pill. Re-POST
+to nbdmux's `/exports` (same payload) to retry; the row will reset
+to `queued` and the worker restarts the pipeline.
 
 ## When to use ramboot, when to use flash
 

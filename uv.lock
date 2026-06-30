@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "bty-lab"
-version = "0.64.3"
+version = "0.65.0"
 source = { editable = "." }
 dependencies = [
     { name = "nbdmux" },
@@ -84,7 +84,7 @@ requires-dist = [
     { name = "itsdangerous", marker = "extra == 'web'", specifier = ">=2.1" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1" },
-    { name = "nbdmux", specifier = ">=0.1.2" },
+    { name = "nbdmux", specifier = ">=0.2.0" },
     { name = "python-multipart", marker = "extra == 'all'", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.9" },
     { name = "rich", marker = "extra == 'all'", specifier = ">=13" },
@@ -492,11 +492,11 @@ wheels = [
 
 [[package]]
 name = "nbdmux"
-version = "0.1.2"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a4/8a/8737ae686b4a33ed7ac462704b0e1372eabda32ed8a6342b6af14349076d/nbdmux-0.1.2.tar.gz", hash = "sha256:d953f33f8ddeb02586736279b94ff33abd656922efc4ac093b7fd7802108d590", size = 19065, upload-time = "2026-06-29T20:29:07.464Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/18/cb3cef0e4f3c85997ca7d4d6f7908c03f18e9235988de8990382816ac779/nbdmux-0.2.0.tar.gz", hash = "sha256:5f241f8293588a49577e30a3b52833334671b6524be0c9b41e46be754299c158", size = 26381, upload-time = "2026-06-30T12:39:54.063Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5b/65/8cb2260e522d2510896126b19b6cc78a56c90b3e0f7795222db53820caea/nbdmux-0.1.2-py3-none-any.whl", hash = "sha256:aa8a2c510037d4f14672371b12bc9e5d0d3fbbf39811bce3bc4eb96f9647f35a", size = 14155, upload-time = "2026-06-29T20:29:06.28Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/da/4d094fc1d15f2fc2565990fb387aeccbf543987748fdcdd3b2aba9cb47b7/nbdmux-0.2.0-py3-none-any.whl", hash = "sha256:280132dbd161673d51468b02564147fd102ebcf3c6f4fe9dc16047ee56b74300", size = 21174, upload-time = "2026-06-30T12:39:52.657Z" },
 ]
 
 [[package]]

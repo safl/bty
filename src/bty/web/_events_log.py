@@ -113,10 +113,6 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "settings.backup.updated",
     "settings.display.updated",
     "settings.ramboot.updated",
-    "ramboot.pre_warm.requested",
-    "ramboot.pre_warm.started",
-    "ramboot.pre_warm.completed",
-    "ramboot.pre_warm.failed",
     "settings.config.updated",
     "settings.config.failed",
     "backup.created",
@@ -144,7 +140,6 @@ KNOWN_SUBJECT_KINDS: tuple[str, ...] = (
     "settings",
     "auth",
     "backup",
-    "ramboot_cache",
 )
 
 # Catalogue of ``actor`` values the rest of bty-web emits. Powers
@@ -156,7 +151,6 @@ KNOWN_ACTORS: tuple[str, ...] = (
     "operator",
     "system",
     "pxe-client",
-    "ramboot-worker",
 )
 
 

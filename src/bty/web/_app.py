@@ -38,6 +38,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
+from nbdmux import client as nbdmux_client
 from starlette.datastructures import UploadFile
 from starlette.middleware.sessions import SessionMiddleware
 from withcache import oras as _oras
@@ -47,11 +48,9 @@ from bty import catalog as _catalog
 from bty import images
 from bty.web import (
     _backup,
-    _config,
     _db,
     _labels,
     _models,
-    _ramboot_cache,
     _release_mgr,
     _security,
     _settings_store,
@@ -225,10 +224,6 @@ def create_app(
             catalog_state.catalog = None
     release_fetch_manager = _release_mgr.ReleaseFetchManager()
     backup_manager = _backup.BackupManager()
-    ramboot_cache_manager = _ramboot_cache.RambootCacheManager(
-        state_path=state_path,
-        live_images_dir=_config.cfg().live_images_dir,
-    )
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -292,25 +287,6 @@ def create_app(
         backup_scheduler_task = asyncio.create_task(
             _backup.scheduler_loop(state_path, backup_manager, backup_stop_event)
         )
-        # Ramboot pre-warm worker. Drains the in-memory queue + the
-        # ``ramboot_cache`` table; per-image idempotent so a restart
-        # mid-pre-warm picks up where it left off via re-enqueue
-        # from any machine still bound to that ref.
-        ramboot_cache_manager.start()
-        # Resume any queued / in-flight rows that survived a restart.
-        # The worker is single-threaded, so dropping multiple refs on
-        # the queue is fine; the worker picks them up serially. We
-        # only resume rows that are in non-terminal states; ``ready``
-        # stays ``ready`` (the nbdmux export survives bty-web restarts
-        # because the daemon is a separate process), ``failed`` stays
-        # ``failed`` until the operator re-enqueues from the UI.
-        with _db.open_db(state_path) as _conn:
-            _resume_rows = _conn.execute(
-                "SELECT ref FROM ramboot_cache "
-                "WHERE status IN ('queued','fetching','decompressing','registering')"
-            ).fetchall()
-        for _r in _resume_rows:
-            ramboot_cache_manager.enqueue(str(_r["ref"]))
         try:
             yield
         finally:
@@ -329,7 +305,6 @@ def create_app(
                 await backup_scheduler_task
             await release_fetch_manager.stop()
             await backup_manager.stop()
-            ramboot_cache_manager.stop()
             # Wake every SSE subscribe() generator so the
             # StreamingResponse exits its yield loop. Without this,
             # browser tabs left open on /ui/machines or /ui/dashboard
@@ -794,18 +769,28 @@ def create_app(
             # + initrd only, no squashfs). The initramfs nbd-client
             # connects to the operator-configured nbdmux, mounts the
             # catalog image's largest partition, overlays a tmpfs for
-            # writes, and pivot_roots before /sbin/init. Gates:
-            #   * nbdmux URL configured in Settings -> Ramboot (or env / bty.toml)
-            #   * ref bound to the machine
-            # Gates: nbdmux URL configured (env or Settings), ref bound,
-            # and the ref's pre-warm has completed (ramboot_cache.status
-            # = 'ready'). Any gate open falls back to ipxe_tui so the
-            # operator sees the misconfiguration in the wizard rather
-            # than the box hard-paniccing in the initramfs.
+            # writes, and pivot_roots before /sbin/init.
+            #
+            # Gates: nbdmux URL configured, ref bound, AND the ref is
+            # registered with nbdmux at status='ready'. The readiness
+            # check delegates to nbdmux (since v0.2.0 nbdmux owns the
+            # warming pipeline + its own ramboot_cache-equivalent
+            # state machine); bty doesn't keep a local mirror. Any
+            # gate open falls back to ipxe_tui so the operator hits
+            # the wizard instead of the box hard-paniccing in the
+            # initramfs.
             with _db.open_db(state_path) as conn:
                 nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
                 overlay_size = _settings_store.resolve_ramboot_overlay_size(conn)
-                ramboot_ready = _ramboot_cache.is_ready(conn, str(ref)) if ref else False
+            ramboot_ready = False
+            if nbdmux_url and ref:
+                try:
+                    exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
+                except nbdmux_client.NbdmuxError:
+                    exports = []
+                ramboot_ready = any(
+                    e.get("name") == str(ref) and e.get("status") == "ready" for e in exports
+                )
             if nbdmux_url and ref and ramboot_ready:
                 # Derive the NBD host from the configured HTTP control
                 # plane URL: same hostname, port 10809 (nbd-server's
@@ -1971,6 +1956,42 @@ def create_app(
     def upsert_machine(mac: str, body: _models.MachineUpsert, request: Request) -> _models.Machine:
         normalised = _normalise_mac(mac)
         now = _now_iso()
+        # Ramboot bind-time gate: the bound ref must already be
+        # registered with nbdmux at ``status='ready'``. nbdmux owns
+        # the warming pipeline since v0.2.0; bty just validates. An
+        # operator who has not yet populated nbdmux gets a 422 here
+        # rather than a silent "would-boot-but-misconfigured" record
+        # that surfaces only at PXE chain time.
+        if body.boot_mode == "ramboot" and body.bty_image_ref:
+            with _db.open_db(state_path) as _conn:
+                nbdmux_url = _settings_store.resolve_nbdmux_url(_conn)
+            if not nbdmux_url:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "ramboot: nbdmux URL not configured "
+                        "(Settings -> Ramboot, or [nbdmux] url in bty.toml)"
+                    ),
+                )
+            try:
+                exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
+            except nbdmux_client.NbdmuxError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"ramboot: nbdmux unreachable: {exc}",
+                ) from exc
+            if not any(
+                e.get("name") == body.bty_image_ref and e.get("status") == "ready" for e in exports
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"ramboot: ref {body.bty_image_ref[:8]}... is not "
+                        f"registered with nbdmux at status='ready'. "
+                        f"Populate it via nbdmux's dashboard at "
+                        f"{nbdmux_url}/ (POST /exports with src_url) first."
+                    ),
+                )
         with _db.open_db(state_path) as conn:
             existing = conn.execute(
                 "SELECT created_at FROM machines WHERE mac = ?", (normalised,)
@@ -2071,32 +2092,10 @@ def create_app(
                     "target_disk_serial": body.target_disk_serial,
                 },
             )
-            # Enqueue pre-warm when the machine is bound to ramboot
-            # with a ref. Idempotent: ``ramboot_cache.enqueue``
-            # returns the existing ``ready`` row untouched, so
-            # saving a machine whose ref is already pre-warmed is a
-            # no-op AND we skip dropping work onto the worker queue
-            # below (the worker shouldn't redo a finished job; the
-            # operator can re-enqueue from the catalog page if they
-            # want a re-warm).
-            _pending_prewarm: str | None = None
-            if body.boot_mode == "ramboot" and body.bty_image_ref:
-                resulting = _ramboot_cache.enqueue(
-                    conn,
-                    body.bty_image_ref,
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                )
-                if resulting.status != "ready":
-                    _pending_prewarm = body.bty_image_ref
             conn.commit()
             row = conn.execute("SELECT * FROM machines WHERE mac = ?", (normalised,)).fetchone()
             labels = _labels.get_labels(conn, normalised) if row is not None else []
         assert row is not None
-        # Drop the pre-warm job onto the worker queue AFTER the commit
-        # so the worker's first DB read sees the freshly-persisted row.
-        if _pending_prewarm:
-            ramboot_cache_manager.enqueue(_pending_prewarm)
         publish_state_changed()
         return _row_to_machine(row, labels)
 
