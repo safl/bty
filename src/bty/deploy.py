@@ -909,22 +909,33 @@ def _chown_to_sudo_user(paths: list[Path]) -> tuple[str, int, int] | None:
 
 def _prepare_data_dirs(data_dir_abs: Path) -> list[Path]:
     """Pre-create the bind-mount targets that ``compose.yml`` mounts
-    into ``withcache`` (`/data`) and ``bty-web`` (`/var/lib/bty`), and
-    open them up so the containers can write regardless of what UID
-    their image's ``USER`` directive resolves to.
+    into ``withcache`` (`/data`), ``nbdmux`` (`/data` + `/images`), and
+    ``bty-web`` (`/var/lib/bty`), and open them up so the containers
+    can write regardless of what UID their image's ``USER`` directive
+    resolves to.
 
-    Why world-writable: withcache's image runs as ``app``, bty-web's
-    as ``bty``. Those UIDs vary across image rebuilds and don't match
-    the host operator's UID. ``chmod 0o777`` on these two appliance-
-    local state dirs avoids a per-image UID lookup AND respects the
-    image authors' choice to drop privileges inside the container.
+    Why world-writable: each image runs as a different non-root user
+    (withcache's ``app``, nbdmux's ``nbdmux``, bty-web's ``bty``).
+    Those UIDs vary across image rebuilds and don't match the host
+    operator's UID. ``chmod 0o777`` on these appliance-local state
+    dirs avoids a per-image UID lookup AND respects the image
+    authors' choice to drop privileges inside the container.
+
+    Missing the nbdmux subdirs was a real outage (v0.62-v0.65.0):
+    ``podman compose up -d`` failed with
+    ``statfs /opt/bty/data/nbdmux: no such file or directory``
+    because podman won't auto-create a host path it's asked to
+    bind-mount into a container. v0.65.1+ ships them.
 
     The bty-tftp service has no volume mount (its NBPs are baked into
     the image), so it's not part of this dance.
 
     Returns the list of created paths for the ``_step`` log line."""
     created: list[Path] = []
-    for sub in ("withcache", "bty"):
+    # bty + withcache + nbdmux's /data subdir; nbdmux/images is the
+    # decompressed-export store (a child path under nbdmux/, but the
+    # parent's mode-0777 covers writes into the child too).
+    for sub in ("withcache", "bty", "nbdmux", "nbdmux/images"):
         p = data_dir_abs / sub
         p.mkdir(parents=True, exist_ok=True)
         p.chmod(0o777)

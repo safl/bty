@@ -9,6 +9,20 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.1] - 2026-06-30
+
+### Fixed
+
+`bty-lab init` now pre-creates the nbdmux data dirs
+(`./data/nbdmux/` and `./data/nbdmux/images/`) the same way it
+already did for withcache and bty-web. Without these, every
+v0.62-v0.65.0 deploy hit `Error: statfs /opt/bty/data/nbdmux:
+no such file or directory` on `podman compose up` because podman
+refuses to auto-create a host path it's asked to bind-mount.
+Operators caught in this state need to re-run
+`bty-lab init --force .` after upgrading to v0.65.1; the dirs
+land with mode 0o777 the same way the existing two do.
+
 ## [0.65.0] - 2026-06-30
 
 ### Changed
