@@ -127,21 +127,27 @@ def test_envvars_example_documents_bty_dns(tmp_path: Path) -> None:
 
 
 def test_prepare_data_dirs_creates_world_writable_mounts(tmp_path: Path) -> None:
-    """withcache (USER app) + bty-web (USER bty) bind-mount ./data/{withcache,bty}
-    and need to write under those paths. Their image-defined UIDs don't match
-    the host operator's, so deploy.py pre-creates the dirs with mode 0o777
-    BEFORE compose up. v0.39.0 shipped without this and withcache crashed on
-    `Permission denied: /data/blobs`."""
+    """All three sidecars bind-mount a host dir under
+    ``./data/<service>/`` (and nbdmux adds an ``images`` subdir for
+    its decompressed exports). Their image-defined UIDs don't match
+    the host operator's, so deploy.py pre-creates the dirs with mode
+    0o777 BEFORE compose up. v0.39.0 shipped without this and
+    withcache crashed on ``Permission denied: /data/blobs``; v0.62.0
+    added the nbdmux sidecar but forgot to add its dirs to this
+    helper, and v0.65.0 / v0.62-0.65.0 deploys hit
+    ``statfs /opt/bty/data/nbdmux: no such file or directory`` on
+    ``compose up``. Fixed in v0.65.1."""
     data_dir = tmp_path / "data"
     created = deploy_mod._prepare_data_dirs(data_dir)
-    assert sorted(p.name for p in created) == ["bty", "withcache"]
+    rel = sorted(str(p.relative_to(data_dir)) for p in created)
+    assert rel == ["bty", "nbdmux", "nbdmux/images", "withcache"]
     for p in created:
         assert p.is_dir()
         # Mode mask -- check the low 9 bits are 0o777 regardless of umask.
         assert (p.stat().st_mode & 0o777) == 0o777, p
     # Idempotent: a second call on an existing tree is a no-op.
     again = deploy_mod._prepare_data_dirs(data_dir)
-    assert [p.name for p in again] == ["withcache", "bty"]
+    assert sorted(str(p.relative_to(data_dir)) for p in again) == rel
 
 
 def test_env_example_has_required_keys(tmp_path: Path) -> None:
