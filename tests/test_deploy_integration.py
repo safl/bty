@@ -45,15 +45,11 @@ HEALTHZ_TIMEOUT = 60.0  # seconds to wait for each service's healthz
 
 
 def _compose_backend() -> str | None:
-    """Return the compose-backend binary name available on PATH,
-    or ``None`` if none is installed. ``podman compose`` itself is
-    a wrapper that searches for one of these; matching its
-    discovery order means a green test here implies a green
-    ``podman compose``."""
-    for cand in ("podman-compose", "docker-compose"):
-        if shutil.which(cand):
-            return cand
-    return None
+    """Return ``podman-compose`` if it's on PATH, else ``None``.
+    The test invokes podman-compose directly (see _compose_cmd
+    for why), so docker-compose-plugin doesn't count even though
+    ``podman compose`` would find it."""
+    return "podman-compose" if shutil.which("podman-compose") else None
 
 
 def _port_in_use(port: int) -> bool:
@@ -83,14 +79,32 @@ def _wait_healthz(port: int, path: str = "/healthz") -> None:
     raise AssertionError(f"healthz timeout: {url}: {last_err}")
 
 
+def _compose_cmd() -> list[str]:
+    """The compose invocation the test uses. Prefer ``podman-compose``
+    directly: ``podman compose`` is a wrapper that picks the first
+    available provider in (docker-compose-plugin, podman-compose),
+    and the docker-compose plugin fails on a runner without dockerd
+    (GitHub Actions runners ship both but only podman is available).
+    Invoking ``podman-compose`` directly sidesteps that selection."""
+    return ["podman-compose"]
+
+
 def _compose_up(dest: Path) -> None:
-    """Bring up the stack with the envvars file. Raises on non-zero."""
-    subprocess.run(
-        ["podman", "compose", "--env-file", "envvars", "up", "-d"],
-        cwd=dest,
-        check=True,
-        capture_output=True,
-    )
+    """Bring up the stack with the envvars file. Raises on non-zero
+    with stderr in the exception for diagnostics."""
+    try:
+        subprocess.run(
+            [*_compose_cmd(), "--env-file", "envvars", "up", "-d"],
+            cwd=dest,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise AssertionError(
+            f"compose up failed (rc={exc.returncode})\n"
+            f"--- stdout ---\n{exc.stdout.decode('replace') if exc.stdout else ''}\n"
+            f"--- stderr ---\n{exc.stderr.decode('replace') if exc.stderr else ''}"
+        ) from exc
 
 
 def _compose_down(dest: Path) -> None:
@@ -99,7 +113,7 @@ def _compose_down(dest: Path) -> None:
     teardown stage shouldn't itself fail noisily if a container
     is already gone)."""
     subprocess.run(
-        ["podman", "compose", "--env-file", "envvars", "down", "-v"],
+        [*_compose_cmd(), "--env-file", "envvars", "down", "-v"],
         cwd=dest,
         check=False,
         capture_output=True,
