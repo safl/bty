@@ -9,6 +9,19 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.64.3] - 2026-06-30
+
+### Fixed
+
+Machine-edit form no longer tags the Image field as "(not used by
+ramboot)" when the operator selects `boot_mode=ramboot`. The
+template's `data-policy-relevant` attribute on the Image row only
+listed the two flash modes (`bty-flash-always`, `bty-flash-once`);
+ramboot also reads the bound ref (it's what the pre-warm worker
+fetches, decompresses, and registers as the nbdmux export). The
+form-text under the field is reworded to spell out that the same
+ref drives both paths.
+
 ## [0.64.2] - 2026-06-30
 
 ### Changed

@@ -215,7 +215,7 @@
                 policy).
             </p>
 
-            <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
+            <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once ramboot">
                 <label class="form-label" for="bty_image_ref">Image
                     <span class="policy-usage small text-muted fw-normal ms-1"></span></label>
                 <select name="bty_image_ref" id="bty_image_ref" class="form-select">
@@ -232,8 +232,12 @@
                     {% endfor %}
                 </select>
                 <div class="form-text">
-                    Image bound for flashing. Read by <code>bty-flash-always</code>
-                    and <code>bty-flash-once</code>.
+                    Image bound for flashing (<code>bty-flash-always</code> /
+                    <code>bty-flash-once</code>) or for over-NBD ramboot
+                    (<code>ramboot</code>). The same ref drives both paths:
+                    the flash modes dd the image to disk; ramboot pre-warms
+                    it through nbdmux and the target mounts it read-only
+                    with an overlay over tmpfs.
                 </div>
             </div>
             <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
