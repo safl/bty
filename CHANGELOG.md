@@ -9,6 +9,24 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.2] - 2026-06-30
+
+### Added
+
+A real-container integration test (`tests/test_deploy_integration.py`)
+that exercises the deploy lifecycle end-to-end: `bty-lab init` writes
+the compose stack, `podman compose up -d` brings it up, healthz
+returns 200 on bty-web + withcache + nbdmux, `compose down -v`
+cleans up, and the whole sequence repeats. Marked
+`@pytest.mark.integration` so it stays out of the default unit-test
+loop; skips cleanly when podman or a compose backend isn't on PATH
+(matches the existing pattern for the `flash-integration` job).
+
+A new `deploy-integration` CI job runs the test against
+ghcr.io-hosted images so the kind of bug v0.65.1 fixed (missing
+data dirs caused `compose up` to fail with a `statfs ENOENT` that
+no unit test could have caught) doesn't regress.
+
 ## [0.65.1] - 2026-06-30
 
 ### Fixed
