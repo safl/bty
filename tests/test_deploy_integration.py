@@ -167,8 +167,28 @@ def test_deploy_purge_redeploy_lifecycle(deploy_dest: Path) -> None:
     import bty.deploy as deploy_mod
 
     def _provision(dest: Path) -> None:
-        """init + copy envvars.example -> envvars."""
+        """init + copy envvars.example -> envvars; rewrite the bty-*
+        image tags to ``:latest``.
+
+        The generated compose pins to the running ``bty.__version__``
+        (e.g. ``ghcr.io/safl/bty-web:0.65.2``), but THIS PR is the one
+        that publishes that tag; on a PR-build CI run, ghcr.io only
+        has tags up to the previous release. ``:latest`` always
+        resolves to the most recently published release of each
+        image, so the test exercises the deploy contract against
+        real bytes without depending on its own unreleased tag.
+        """
+        import bty as _bty
+
         deploy_mod.init_main([str(dest)])
+        compose_yml = dest / "compose.yml"
+        body = compose_yml.read_text(encoding="utf-8")
+        for img in ("bty-web", "bty-tftp"):
+            body = body.replace(
+                f"ghcr.io/safl/{img}:{_bty.__version__}",
+                f"ghcr.io/safl/{img}:latest",
+            )
+        compose_yml.write_text(body, encoding="utf-8")
         envvars_example = dest / "envvars.example"
         envvars = dest / "envvars"
         shutil.copy(envvars_example, envvars)
