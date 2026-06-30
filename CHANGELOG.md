@@ -9,6 +9,33 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.64.2] - 2026-06-30
+
+### Changed
+
+Unified the default password across the three sidecar dashboards
+so a fresh deploy lands with one rotation away from a unique
+secret rather than three differently-named placeholders. The
+generated `envvars.example` now ships
+`BTY_ADMIN_PASSWORD=bty-lab`, `WITHCACHE_ADMIN_PASSWORD=bty-lab`,
+and `NBDMUX_ADMIN_PASSWORD=bty-lab` (matching the in-code
+`DEFAULT_ADMIN_PASSWORD` and the `bty-lab deploy` auto-fill);
+`BTY_ADMIN_PASSWORD` moves out of the commented-out
+"strongly recommended" section into the REQUIRED block alongside
+the other two.
+
+The post-deploy summary `bty-lab deploy` prints now also lists
+the nbdmux URL on a parallel line to bty-web and withcache, so
+the operator sees all three dashboards in one place:
+
+    bty-web UI:  http://10.0.0.5:8080/ui   (login: bty-lab / bty-lab)
+    withcache:   http://10.0.0.5:3000/     (login: bty-lab / bty-lab)
+    nbdmux:      http://10.0.0.5:4040/     (login: bty-lab / bty-lab)
+
+The `deploy/quadlet/withcache.container` reference unit's
+hardcoded placeholder also moves from `change-me` to `bty-lab`
+so the placeholder shape matches.
+
 ## [0.64.1] - 2026-06-30
 
 ### Changed

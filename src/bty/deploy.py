@@ -73,7 +73,12 @@ DEFAULT_DEPLOY_PASSWORD = "bty-lab"
 
 # Placeholder password the stand-alone ``init`` reference units carry
 # (operator edits before installing); deploy/upgrade bake a real value.
-_PLACEHOLDER_PASSWORD = "change-me"
+# Same string as DEFAULT_DEPLOY_PASSWORD + bty.web._config.
+# DEFAULT_ADMIN_PASSWORD so all three sidecar dashboards (bty-web,
+# withcache, nbdmux) share one default value out of the box.
+# Operators rotate this once before LAN exposure; uniform default
+# means one rotation, not three different "change-me"s to track.
+_PLACEHOLDER_PASSWORD = DEFAULT_DEPLOY_PASSWORD
 
 
 def _compose_yaml(version: str) -> str:
@@ -195,23 +200,22 @@ def _env_example(default_data_dir: str) -> str:
 # 127.0.0.1, not a container name.
 HOST_ADDR=10.0.0.5
 
-# Operator login for the withcache UI at http://<host>:3000/.
-WITHCACHE_ADMIN_PASSWORD=change-me
-
-# Operator login for the nbdmux UI at http://<host>:4040/. nbdmux
-# is the bytes path for the ramboot boot mode (see the Settings ->
-# Ramboot card in bty-web). nbdmux's NBD port (10809) is
-# unauthenticated regardless of this value; firewall the port to
-# the lab's LAN.
-NBDMUX_ADMIN_PASSWORD=change-me
+# Operator logins for the three sidecar dashboards. Same default
+# value (``bty-lab``) across all three so a fresh deploy lands one
+# rotation away from a unique-per-deploy secret. Rotate before
+# exposing the host past a trusted LAN.
+#
+#   bty-web operator UI: http://<host>:8080/ui
+#   withcache UI:        http://<host>:3000/
+#   nbdmux UI:           http://<host>:4040/
+#
+# nbdmux's NBD port (10809) is unauthenticated regardless of
+# NBDMUX_ADMIN_PASSWORD; firewall it to the lab's LAN.
+BTY_ADMIN_PASSWORD=bty-lab
+WITHCACHE_ADMIN_PASSWORD=bty-lab
+NBDMUX_ADMIN_PASSWORD=bty-lab
 
 # ==== STRONGLY RECOMMENDED ====
-
-# Gates the bty-web operator UI at http://<host>:8080/ui (constant-
-# time password compare). UNSET = UI open (bty-web logs a startup
-# warning on first boot). Set this before exposing past a trusted
-# LAN.
-# BTY_ADMIN_PASSWORD=change-me
 
 # ==== COMMON CUSTOMISATIONS ====
 
@@ -1395,6 +1399,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     print(
         f"  bty-web UI:  http://{host_addr}:8080/ui   (login: {admin_pw} / {admin_pw})\n"
         f"  withcache:   http://{host_addr}:3000/     (login: {withcache_pw} / {withcache_pw})\n"
+        f"  nbdmux:      http://{host_addr}:4040/     (login: {nbdmux_pw} / {nbdmux_pw})\n"
         f"\n"
         f"  Change the default passwords in {envvars_path} before exposing\n"
         f"  the host past a trusted LAN.",
