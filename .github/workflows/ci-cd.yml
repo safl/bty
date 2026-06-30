@@ -195,7 +195,40 @@ jobs:
       - run: uv sync --all-extras --group dev
       # Integration tests use losetup + dd against a real loop device, so they
       # need root; the default pytest run excludes them (pyproject addopts).
+      # The deploy-purge-redeploy lifecycle test is also ``@integration``
+      # but needs podman + a compose backend (NOT losetup); this job's
+      # environment doesn't carry those, so the deploy test skips cleanly
+      # here -- it runs for real in the dedicated ``deploy-integration``
+      # job below.
       - run: sudo -E env "PATH=$PATH" uv run pytest -m integration -v
+
+  deploy-integration:
+    name: Deploy integration (compose lifecycle)
+    needs: check-not-published
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Install podman + a compose backend
+        # Ubuntu 24.04 ships podman in the universe pool;
+        # podman-compose is the lightest backend the deploy script
+        # supports. Skip docker-compose to keep the install small.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            podman \
+            python3-pip
+          sudo pip install --break-system-packages podman-compose
+          podman --version
+          podman-compose --version
+      - run: uv sync --all-extras --group dev
+      # The lifecycle test runs init -> compose up -> healthz on
+      # all three sidecars -> compose down -v -> compose up ->
+      # healthz -> compose down -v. Pulls images from ghcr.io, so
+      # the runner needs outbound network (which it has).
+      - run: uv run pytest -m integration tests/test_deploy_integration.py -v
 
   # ---------------- build --------------------------------------------------
   build-wheel:
@@ -730,7 +763,7 @@ jobs:
   # a failing test-pxe) never gets tagged. The tag is pushed with RELEASE_PAT
   # because a GITHUB_TOKEN push would not trigger this workflow.
   tag-release:
-    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, deploy-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -994,7 +1027,7 @@ jobs:
     # attach-to-release's needs list -- without this a regression that reds
     # the PXE chain test still ships :latest tags to ghcr.io because publish
     # was only blocked by the unit-level ``test`` job.
-    needs: [lint, test, flash-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, deploy-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
