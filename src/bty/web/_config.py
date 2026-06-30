@@ -105,11 +105,6 @@ class PathsConfig:
     boot_dir: str = ""  # blank -> <state_dir>/boot
     backup_dir: str = ""  # blank -> <state_dir>/backups
     catalog_file: str = ""  # blank -> <state_dir>/catalog.toml
-    # Where the ramboot pre-warm worker decompresses catalog images
-    # to (one ``.img`` per ref). The same dir is bind-mounted into
-    # the nbdmux sidecar in the generated compose, so the bytes
-    # are shared without a copy. Blank -> <state_dir>/live-images.
-    live_images_dir: str = ""
 
 
 @dataclass(frozen=True)
@@ -210,14 +205,6 @@ class Config:
             Path(self.paths.catalog_file)
             if self.paths.catalog_file
             else self.state_dir / "catalog.toml"
-        )
-
-    @property
-    def live_images_dir(self) -> Path:
-        return (
-            Path(self.paths.live_images_dir)
-            if self.paths.live_images_dir
-            else self.state_dir / "live-images"
         )
 
     @property

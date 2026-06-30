@@ -9,6 +9,40 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.0] - 2026-06-30
+
+### Changed
+
+Ramboot's warming pipeline moves out of bty-web and into the
+nbdmux sidecar (which lifted the worker in its v0.2.0 release).
+bty no longer fetches catalog bytes, decompresses, registers
+exports, or holds any ramboot pipeline state. The bty-side
+machine-bind path becomes pure validation: it queries
+`nbdmux.client.list_exports()` and chains the ramboot iPXE
+template iff the ref is registered at `status='ready'`. Anything
+else falls back to bty-tui with a reason on the events feed,
+unchanged.
+
+### Removed
+
+The `RambootCacheManager` worker, the `_ramboot_cache` module,
+the `ramboot_cache` SQL table, the four `ramboot.pre_warm.*`
+audit kinds, the `ramboot-worker` actor, the `ramboot_cache`
+subject kind, the `[paths] live_images_dir` config field, and
+the corresponding bind-mount in the generated `compose.yml`
+that shared bty-web's `/var/lib/bty/live-images` with nbdmux's
+`/images`. Operator state is regenerable; the on-disk SQL table
+will simply not be referenced after upgrade (the empty rows
+sit harmless until the next state.db rotation).
+
+### Added
+
+`nbdmux>=0.2.0` is now a hard dependency (was `>=0.1.2`). The
+generated `compose.yml` adds `NBDMUX_WITHCACHE_URL=http://withcache:3000`
+to the nbdmux sidecar's environment so the in-daemon warmer
+routes through the existing LAN cache for ramboot fetches the
+same way the flash path does.
+
 ## [0.64.3] - 2026-06-30
 
 ### Fixed

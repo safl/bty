@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.64.3"
+version = "0.65.0"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,10 +26,11 @@ dependencies = [
     "withcache>=0.6.0",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
-    # bty calls ``nbdmux.client`` from the pre-warm worker to register
-    # decompressed images as named exports; the daemon serves them on
-    # port 10809 to the ramboot-init initramfs over NBD.
-    "nbdmux>=0.1.2",
+    # As of v0.2.0 nbdmux owns the fetch + decompress pipeline too
+    # (it lifted the worker we previously kept here); bty only
+    # validates readiness via ``nbdmux.client.list_exports`` at PXE
+    # chain time and at machine-binding time.
+    "nbdmux>=0.2.0",
 ]
 
 [project.optional-dependencies]

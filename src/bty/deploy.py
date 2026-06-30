@@ -142,6 +142,10 @@ services:
       - "10809:10809"
     environment:
       NBDMUX_ADMIN_PASSWORD: ${{NBDMUX_ADMIN_PASSWORD:?set in envvars}}
+      # The warmer pipeline (nbdmux v0.2.0+) fetches src_urls through
+      # this withcache; pointing at the in-stack sidecar means ramboot
+      # warm POSTs benefit from the same LAN cache as the flash path.
+      NBDMUX_WITHCACHE_URL: http://withcache:3000
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux:/data
       - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux/images:/images
@@ -167,9 +171,6 @@ services:
       # RW (no :ro) so Settings-page edits land back on the host file,
       # matching the Quadlet unit's mount.
       - ./bty.toml:/etc/bty/bty.toml
-      # bty-web decompresses catalog images here on the ramboot
-      # pre-warm path; nbdmux serves them over NBD. Shared bind.
-      - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux/images:/var/lib/bty/live-images
     depends_on:
       - withcache
       - nbdmux
