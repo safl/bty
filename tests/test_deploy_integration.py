@@ -57,18 +57,27 @@ def _port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _wait_healthz(port: int, path: str = "/healthz") -> None:
+def _wait_healthz(
+    port: int,
+    path: str = "/healthz",
+    *,
+    timeout: float | None = None,
+    extra_diagnostics: str | None = None,
+) -> None:
     """Poll the given port + path for HTTP 200; raises after
-    HEALTHZ_TIMEOUT. The port is the host-side bind from the
-    compose entry, hit on 127.0.0.1. On timeout, dump every
-    running container's name + status + tail of logs so the CI
-    failure surfaces WHY the service didn't come up, not just
-    that it didn't answer."""
+    ``timeout`` (defaults to HEALTHZ_TIMEOUT) seconds. The port is
+    the host-side bind from the compose / Quadlet entry, hit on
+    127.0.0.1. On timeout, dump every running container's name +
+    status + tail of logs, plus any caller-provided
+    ``extra_diagnostics`` string (for quadlet: journalctl per
+    service, systemctl status per service) so the CI failure
+    surfaces WHY the service didn't come up, not just that it
+    didn't answer."""
     import urllib.error
     import urllib.request
 
+    deadline = time.monotonic() + (timeout if timeout is not None else HEALTHZ_TIMEOUT)
     url = f"http://127.0.0.1:{port}{path}"
-    deadline = time.monotonic() + HEALTHZ_TIMEOUT
     last_err: str = ""
     while time.monotonic() < deadline:
         try:
@@ -79,7 +88,10 @@ def _wait_healthz(port: int, path: str = "/healthz") -> None:
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
             last_err = str(exc)
         time.sleep(1.0)
-    raise AssertionError(f"healthz timeout: {url}: {last_err}\n\n{_container_diagnostics()}")
+    diag = _container_diagnostics()
+    if extra_diagnostics:
+        diag = f"{diag}\n\n{extra_diagnostics}"
+    raise AssertionError(f"healthz timeout: {url}: {last_err}\n\n{diag}")
 
 
 def _container_diagnostics() -> str:
@@ -323,6 +335,27 @@ def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess[st
     )
 
 
+def _quadlet_diagnostics() -> str:
+    """Snapshot of every bty service's systemctl status + journalctl
+    tail. Emitted on healthz-timeout so the CI log surfaces WHY the
+    service crashed (quadlet-managed containers use ``--rm`` by
+    default; a container that crashes on start disappears from
+    ``podman ps -a`` between Restart=always cycles, so journalctl
+    is the only source of the actual error)."""
+    lines: list[str] = []
+    for svc in QUADLET_SERVICE_NAMES:
+        status = _systemctl("status", "--no-pager", "-l", svc, check=False)
+        lines.append(f"\n--- systemctl status {svc} ---\n{status.stdout}")
+        jc = subprocess.run(
+            ["journalctl", "-u", svc, "--no-pager", "-n", "60"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        lines.append(f"\n--- journalctl -u {svc} (tail 60) ---\n{jc.stdout}")
+    return "\n".join(lines)
+
+
 def _quadlet_teardown() -> None:
     """Best-effort: stop every bty quadlet service, remove every unit,
     daemon-reload. Runs on both test success + failure so the runner
@@ -430,9 +463,13 @@ def test_deploy_purge_redeploy_quadlet_lifecycle(
         )
     _assert_all_services_active()
     # Healthz on every sidecar. nbdmux is the one v0.65.2 got wrong.
-    _wait_healthz(8080)  # bty-web
-    _wait_healthz(3000)  # withcache
-    _wait_healthz(4040)  # nbdmux
+    # Longer timeout + quadlet-specific diagnostics on failure:
+    # quadlet-managed containers default to --rm so a crash-loop
+    # produces no visible container between Restart cycles; only
+    # journalctl carries the crash reason.
+    _wait_healthz(8080, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # bty-web
+    _wait_healthz(3000, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # withcache
+    _wait_healthz(4040, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # nbdmux
 
     # Round 2: purge, then verify the deploy path is undone.
     deploy_mod.purge_main([str(quadlet_deploy_dest), "--all", "--yes"])
