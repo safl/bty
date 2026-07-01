@@ -1427,9 +1427,19 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
         ),
         encoding="utf-8",
     )
-    # Mode 0640: contains the admin password + session secret in
-    # plaintext, so operator + group readable but not world-readable.
-    bty_toml_path.chmod(0o640)
+    # Mode 0644: contains the admin password + session secret in
+    # plaintext, so ideally not world-readable. But bty-web's
+    # container image runs as UID 1000 (user ``bty``), and under
+    # rootful podman without user namespaces (systemd Quadlet on
+    # a typical bare-metal Debian appliance) that UID reads the
+    # bind-mount with its own credentials. A 0o640 file owned by
+    # root:root is unreadable by that UID, so bty-web crashes on
+    # startup with a config-file-not-readable error. World-readable
+    # is the appliance-friendly compromise: an appliance box has
+    # no non-operator local users, and root can read anything
+    # regardless of mode. The operator can lock this down further
+    # by chowning bty.toml to their user + chmod 0o640 post-deploy.
+    bty_toml_path.chmod(0o644)
     _step("wrote bty.toml", detail=str(bty_toml_path))
 
     # Hand the deploy dir back to the original operator so they can
