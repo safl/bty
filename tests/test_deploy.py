@@ -246,6 +246,7 @@ def test_systemd_emits_quadlet_units_with_absolute_paths(tmp_path: Path) -> None
     quadlet = dest / "quadlet"
     assert (quadlet / "bty-web.container").is_file()
     assert (quadlet / "withcache.container").is_file()
+    assert (quadlet / "nbdmux.container").is_file()
     assert (quadlet / "bty-tftp.container").is_file()
     web = (quadlet / "bty-web.container").read_text(encoding="utf-8")
     # Quadlet runs from systemd's cwd, not the operator's -- bind-mount
@@ -253,6 +254,42 @@ def test_systemd_emits_quadlet_units_with_absolute_paths(tmp_path: Path) -> None
     expected = (dest / "data" / "bty").resolve()
     assert f"Volume={expected}:/var/lib/bty:Z" in web
     assert f"Image=ghcr.io/safl/bty-web:{bty.__version__}" in web
+
+
+def test_systemd_nbdmux_quadlet_has_ports_volumes_and_withcache_url(
+    tmp_path: Path,
+) -> None:
+    """The Quadlet path missed nbdmux entirely in v0.62-v0.65.2, so a
+    system install (bty-lab deploy as root) came up without ramboot
+    at all - nothing on 4040 or 10809. Guard the shape of the emitted
+    unit: image ref, published ports, bind-mounts, and the
+    NBDMUX_WITHCACHE_URL wired to host.containers.internal (Quadlet
+    has no shared compose network, so it can't use 'withcache:3000')."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.init_main([str(dest), "--systemd"])
+    nbdmux = (dest / "quadlet" / "nbdmux.container").read_text(encoding="utf-8")
+    assert "Image=ghcr.io/safl/nbdmux:latest" in nbdmux
+    assert "PublishPort=4040:4040" in nbdmux
+    assert "PublishPort=10809:10809" in nbdmux
+    data_abs = (dest / "data").resolve()
+    assert f"Volume={data_abs}/nbdmux:/data:Z" in nbdmux
+    assert f"Volume={data_abs}/nbdmux/images:/images:Z" in nbdmux
+    assert "Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:3000" in nbdmux
+
+
+def test_deploy_bakes_password_into_nbdmux_quadlet(
+    tmp_path: Path, _patched_runtime: dict[str, list]
+) -> None:
+    """As with withcache: `bty-lab deploy` as root must bake the chosen
+    admin password into the nbdmux Quadlet, not leave the placeholder
+    (the unit is installed straight away, so a placeholder would win
+    over the credential printed in the deploy summary)."""
+    dest = tmp_path / "bty-host"
+    deploy_mod.deploy_main([str(dest)])
+    nbdmux = (dest / "quadlet" / "nbdmux.container").read_text(encoding="utf-8")
+    assert f"Environment=NBDMUX_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}" in nbdmux
+    envvars = (dest / "envvars").read_text(encoding="utf-8")
+    assert f"NBDMUX_ADMIN_PASSWORD={deploy_mod.DEFAULT_DEPLOY_PASSWORD}" in envvars
 
 
 def test_deploy_bakes_password_into_withcache_quadlet(
