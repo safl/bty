@@ -228,7 +228,43 @@ jobs:
       # all three sidecars -> compose down -v -> compose up ->
       # healthz -> compose down -v. Pulls images from ghcr.io, so
       # the runner needs outbound network (which it has).
-      - run: uv run pytest -m integration tests/test_deploy_integration.py -v
+      - run: uv run pytest -m integration tests/test_deploy_integration.py -v -k "not quadlet"
+
+  deploy-quadlet-integration:
+    name: Deploy integration (quadlet lifecycle, root)
+    needs: check-not-published
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Install podman + podman-compose (no docker-compose-plugin)
+        # ``bty-lab deploy`` invokes ``podman compose``, which picks
+        # the first available provider in (docker-compose-plugin,
+        # podman-compose). Ubuntu 24.04 ships the docker-compose
+        # plugin, but no dockerd is running on the runner so it
+        # fails. Purge the plugin so podman falls through to
+        # podman-compose (which mirrors what Debian 13 operators
+        # actually have installed).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            podman \
+            python3-pip
+          sudo apt-get purge -y docker-compose-plugin || true
+          sudo pip install --break-system-packages podman-compose
+          podman --version
+          podman-compose --version
+          systemctl --version | head -n1
+      - run: uv sync --all-extras --group dev
+      # The quadlet lifecycle test runs deploy -> Quadlet install to
+      # /etc/containers/systemd/ -> systemctl start -> healthz on
+      # all four sidecars -> purge -> verify -> redeploy -> verify.
+      # Needs root for /etc/containers/systemd/ writes + systemctl
+      # daemon-reload. ``sudo -E`` preserves PATH so ``uv run`` /
+      # ``python`` remain the ones setup-uv installed.
+      - run: sudo -E env "PATH=$PATH" uv run pytest -m integration tests/test_deploy_integration.py::test_deploy_purge_redeploy_quadlet_lifecycle -v
 
   # ---------------- build --------------------------------------------------
   build-wheel:
@@ -763,7 +799,7 @@ jobs:
   # a failing test-pxe) never gets tagged. The tag is pushed with RELEASE_PAT
   # because a GITHUB_TOKEN push would not trigger this workflow.
   tag-release:
-    needs: [lint, test, flash-integration, deploy-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, deploy-integration, deploy-quadlet-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -1027,7 +1063,7 @@ jobs:
     # attach-to-release's needs list -- without this a regression that reds
     # the PXE chain test still ships :latest tags to ghcr.io because publish
     # was only blocked by the unit-level ``test`` job.
-    needs: [lint, test, flash-integration, deploy-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
+    needs: [lint, test, flash-integration, deploy-integration, deploy-quadlet-integration, build-wheel, build-ipxe, build-netboot-pc, build-usbboot-pc, build-usbboot-rpi, test-pxe, test-usb-grow, test-usb-ventoy, docs]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

@@ -277,6 +277,53 @@ def test_systemd_nbdmux_quadlet_has_ports_volumes_and_withcache_url(
     assert "Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:3000" in nbdmux
 
 
+def test_quadlet_service_set_matches_across_all_four_sites(tmp_path: Path) -> None:
+    """Cross-check invariant: adding or removing a Quadlet-managed
+    sidecar requires touching four separate hardcoded tuples in
+    deploy.py (the emit list, ``_SYSTEMD_SERVICES``, the
+    ``_remove_quadlets`` name tuple, and the ``quadlet_managed``
+    detection tuples in ``upgrade_main`` and ``purge_main``). The
+    v0.62-v0.65.2 outage was exactly this drift: the compose emit
+    path grew a fourth sidecar (nbdmux) while the Quadlet path
+    kept enumerating three. This test compares the set of unit
+    filenames actually emitted by init --systemd against every
+    other tuple and fails if they diverge, so a future addition
+    can't silently omit a sidecar from the deploy install path.
+    """
+    dest = tmp_path / "bty-host"
+    deploy_mod.init_main([str(dest), "--systemd"])
+    emitted = {p.name for p in (dest / "quadlet").glob("*.container")}
+
+    # The service names systemctl uses are the container filenames
+    # with .service in place of .container (Quadlet's naming rule).
+    services_from_emit = {n.replace(".container", ".service") for n in emitted}
+    assert services_from_emit == set(deploy_mod._SYSTEMD_SERVICES), (
+        f"_SYSTEMD_SERVICES drift: emit={services_from_emit}, "
+        f"tuple={set(deploy_mod._SYSTEMD_SERVICES)}"
+    )
+
+    # _remove_quadlets iterates a hardcoded tuple; extract it by
+    # monkey-patching the QUADLET_SYSTEM_DIR to a temp path where
+    # every plausible unit exists, then observing which ones the
+    # function tries to unlink.
+    fake_quadlet_dir = tmp_path / "fake-quadlet"
+    fake_quadlet_dir.mkdir()
+    for name in emitted:
+        (fake_quadlet_dir / name).touch()
+    # Also drop a decoy unit that must NOT be picked up (guards
+    # against a lazy `glob('*.container')` implementation that
+    # would happily uninstall an unrelated operator's unit).
+    (fake_quadlet_dir / "unrelated.container").touch()
+
+    orig = deploy_mod.QUADLET_SYSTEM_DIR
+    try:
+        deploy_mod.QUADLET_SYSTEM_DIR = fake_quadlet_dir
+        removed = {p.name for p in deploy_mod._remove_quadlets()}
+    finally:
+        deploy_mod.QUADLET_SYSTEM_DIR = orig
+    assert removed == emitted, f"_remove_quadlets drift: emit={emitted}, remove={removed}"
+
+
 def test_deploy_bakes_password_into_nbdmux_quadlet(
     tmp_path: Path, _patched_runtime: dict[str, list]
 ) -> None:

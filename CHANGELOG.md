@@ -26,6 +26,24 @@ showed up on the `deploy` install method. The Quadlet unit routes
 nbdmux -> withcache via `host.containers.internal:3000` since
 Quadlet units share no compose network.
 
+### Added
+
+A cross-check unit test (`test_quadlet_service_set_matches_across_all_four_sites`)
+that fails if any future service addition or removal ever leaves
+one of the four hardcoded tuples out of sync. That's the class of
+drift this release fixes.
+
+A root-required integration test
+(`test_deploy_purge_redeploy_quadlet_lifecycle`) that exercises
+the recommended install path end-to-end: `bty-lab deploy` -> Quadlet
+units land under /etc/containers/systemd/ -> systemctl brings all
+four services active -> healthz returns 200 on bty-web / withcache
+/ nbdmux -> `bty-lab purge --all --yes` tears everything back down
+-> redeploy on the same path succeeds. Runs in a new
+`deploy-quadlet-integration` CI job so a regression that only shows
+up on the recommended install path fails the release gate rather
+than shipping.
+
 ## [0.65.2] - 2026-06-30
 
 ### Added
