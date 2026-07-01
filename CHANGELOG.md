@@ -9,6 +9,23 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.3] - 2026-07-01
+
+### Fixed
+
+`bty-lab deploy` as root (the documented Debian-13 install path)
+generated a Quadlet stack that silently omitted the nbdmux sidecar,
+so a fresh install came up with bty-web + withcache + bty-tftp but
+no ramboot endpoint on port 4040 or 10809. The Quadlet emit path,
+the `_SYSTEMD_SERVICES` restart list, the `purge` remove list, and
+the upgrade-time "Quadlet-managed?" detection all hardcoded the
+three older units and never grew a fourth when nbdmux was added.
+The compose path was unaffected (it enumerates services from the
+compose file, not a hardcoded tuple), which is why the outage only
+showed up on the `deploy` install method. The Quadlet unit routes
+nbdmux -> withcache via `host.containers.internal:3000` since
+Quadlet units share no compose network.
+
 ## [0.65.2] - 2026-06-30
 
 ### Added
