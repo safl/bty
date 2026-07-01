@@ -303,7 +303,9 @@ def _quadlet_prereqs_missing() -> str | None:
     """Return a skip reason if the quadlet lifecycle test can't run
     here, or None if it can. The recommended install path
     (``bty-lab deploy`` as root on Debian 13) needs root + systemctl
-    + podman + free ports + a clean /etc/containers/systemd/."""
+    + podman + a compose backend (deploy_main warms the registry
+    via ``podman compose pull`` before handing lifecycle off to
+    Quadlet) + free ports + a clean /etc/containers/systemd/."""
     import os
 
     if os.geteuid() != 0:
@@ -312,6 +314,8 @@ def _quadlet_prereqs_missing() -> str | None:
         return "podman not on PATH"
     if shutil.which("systemctl") is None:
         return "systemctl not on PATH"
+    if _compose_backend() is None:
+        return "no compose backend on PATH (deploy_main needs one for `podman compose pull`)"
     if not QUADLET_SYSTEM_DIR.exists():
         return f"{QUADLET_SYSTEM_DIR} doesn't exist (no systemd-quadlet on this host)"
     existing = [n for n in QUADLET_UNIT_NAMES if (QUADLET_SYSTEM_DIR / n).exists()]
