@@ -277,6 +277,184 @@ def test_deploy_purge_redeploy_lifecycle(deploy_dest: Path) -> None:
         _compose_down(deploy_dest)
 
 
+QUADLET_SYSTEM_DIR = Path("/etc/containers/systemd")
+QUADLET_UNIT_NAMES = (
+    "bty-web.container",
+    "withcache.container",
+    "nbdmux.container",
+    "bty-tftp.container",
+)
+QUADLET_SERVICE_NAMES = tuple(n.replace(".container", ".service") for n in QUADLET_UNIT_NAMES)
+
+
+def _quadlet_prereqs_missing() -> str | None:
+    """Return a skip reason if the quadlet lifecycle test can't run
+    here, or None if it can. The recommended install path
+    (``bty-lab deploy`` as root on Debian 13) needs root + systemctl
+    + podman + free ports + a clean /etc/containers/systemd/."""
+    import os
+
+    if os.geteuid() != 0:
+        return "root required (writes to /etc/containers/systemd/)"
+    if shutil.which("podman") is None:
+        return "podman not on PATH"
+    if shutil.which("systemctl") is None:
+        return "systemctl not on PATH"
+    if not QUADLET_SYSTEM_DIR.exists():
+        return f"{QUADLET_SYSTEM_DIR} doesn't exist (no systemd-quadlet on this host)"
+    existing = [n for n in QUADLET_UNIT_NAMES if (QUADLET_SYSTEM_DIR / n).exists()]
+    if existing:
+        return (
+            f"refusing to clobber existing operator install: "
+            f"{QUADLET_SYSTEM_DIR}/ already has {existing}"
+        )
+    busy = [p for p in COMPOSE_PORTS if _port_in_use(p)]
+    if busy:
+        return f"ports already in use: {busy}"
+    return None
+
+
+def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["systemctl", *args],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _quadlet_teardown() -> None:
+    """Best-effort: stop every bty quadlet service, remove every unit,
+    daemon-reload. Runs on both test success + failure so the runner
+    is left clean for other tests."""
+    _systemctl("stop", *QUADLET_SERVICE_NAMES, check=False)
+    _systemctl("reset-failed", *QUADLET_SERVICE_NAMES, check=False)
+    for name in QUADLET_UNIT_NAMES:
+        target = QUADLET_SYSTEM_DIR / name
+        if target.exists():
+            target.unlink()
+    _systemctl("daemon-reload", check=False)
+
+
+@pytest.fixture
+def quadlet_deploy_dest(tmp_path: Path) -> Iterator[Path]:
+    """Fixture pair to deploy_dest but with a guaranteed quadlet
+    teardown on the way out: even if the test asserts mid-way, the
+    system's /etc/containers/systemd/ state gets cleaned up so the
+    next pytest invocation isn't poisoned."""
+    dest = tmp_path / "bty-host-quadlet"
+    yield dest
+    _quadlet_teardown()
+
+
+@pytest.mark.integration
+def test_deploy_purge_redeploy_quadlet_lifecycle(
+    quadlet_deploy_dest: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recommended install path: ``bty-lab deploy`` as root ->
+    Podman Quadlet units under /etc/containers/systemd/ +
+    systemctl-managed lifecycle + all 4 sidecars responding on
+    healthz. The v0.62-v0.65.2 outage this guards against: the
+    Quadlet emit path silently omitted the nbdmux sidecar because
+    four separate hardcoded tuples never grew a fourth entry when
+    nbdmux was added in v0.62. The compose integration test above
+    can't catch this class of bug -- it exercises `podman compose`
+    directly, not the recommended ``bty-lab deploy`` entrypoint that
+    Debian 13 operators actually run.
+
+    Skipped unless running as root with podman + systemd-quadlet
+    available. On CI this runs under ``sudo pytest -m integration``
+    in a dedicated job.
+    """
+    skip = _quadlet_prereqs_missing()
+    if skip is not None:
+        pytest.skip(skip)
+
+    import bty
+    import bty.deploy as deploy_mod
+
+    # Pin the emitted image tag to the previously-published release
+    # so `podman compose pull` + Quadlet service start don't
+    # chicken-and-egg on this PR's own unreleased tag. THIS test is
+    # about the emit + lifecycle glue in deploy_main; version-string
+    # threading is a static test.
+    monkeypatch.setattr(bty, "__version__", "0.65.2")
+    monkeypatch.setattr(deploy_mod, "__version__", "0.65.2", raising=False)
+
+    def _assert_all_services_active() -> None:
+        """Poll each service until active or timeout; fail with
+        systemctl status + journalctl tail so the CI log surfaces
+        why any service didn't come up."""
+        deadline = time.monotonic() + HEALTHZ_TIMEOUT
+        states: dict[str, str] = {}
+        while time.monotonic() < deadline:
+            states = {
+                svc: _systemctl("is-active", svc, check=False).stdout.strip()
+                for svc in QUADLET_SERVICE_NAMES
+            }
+            if all(s == "active" for s in states.values()):
+                return
+            time.sleep(1.0)
+        # Failed: gather diagnostics.
+        diag_lines = [f"service states: {states}"]
+        for svc in QUADLET_SERVICE_NAMES:
+            status = _systemctl("status", "--no-pager", "-l", svc, check=False)
+            diag_lines.append(f"\n--- systemctl status {svc} ---\n{status.stdout}")
+            jc = subprocess.run(
+                ["journalctl", "-u", svc, "--no-pager", "-n", "40"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            diag_lines.append(f"\n--- journalctl -u {svc} (tail 40) ---\n{jc.stdout}")
+        raise AssertionError(
+            "quadlet services didn't reach active state:\n" + "\n".join(diag_lines)
+        )
+
+    def _run_deploy() -> None:
+        # Invoke deploy_main directly (in-process) rather than via
+        # the bty-lab CLI so THIS checkout's deploy.py runs, not a
+        # stale wheel cached by uvx.
+        deploy_mod.deploy_main([str(quadlet_deploy_dest), "--force"])
+
+    # Round 1: fresh deploy.
+    _run_deploy()
+
+    # All four units landed in the system dir (this is what
+    # v0.65.2 got wrong: only three).
+    for name in QUADLET_UNIT_NAMES:
+        assert (QUADLET_SYSTEM_DIR / name).exists(), (
+            f"{QUADLET_SYSTEM_DIR}/{name} missing after `bty-lab deploy` -- "
+            f"a hardcoded tuple in deploy.py forgot to include it"
+        )
+    _assert_all_services_active()
+    # Healthz on every sidecar. nbdmux is the one v0.65.2 got wrong.
+    _wait_healthz(8080)  # bty-web
+    _wait_healthz(3000)  # withcache
+    _wait_healthz(4040)  # nbdmux
+
+    # Round 2: purge, then verify the deploy path is undone.
+    deploy_mod.purge_main([str(quadlet_deploy_dest), "--all", "--yes"])
+    for name in QUADLET_UNIT_NAMES:
+        assert not (QUADLET_SYSTEM_DIR / name).exists(), (
+            f"{QUADLET_SYSTEM_DIR}/{name} still present after `bty-lab purge --all`"
+        )
+    # Services are inactive (or gone).
+    for svc in QUADLET_SERVICE_NAMES:
+        state = _systemctl("is-active", svc, check=False).stdout.strip()
+        assert state in {"inactive", "failed", "unknown"}, f"{svc} still {state!r} after purge"
+
+    # Round 3: redeploy on the same path. Same contract as round 1.
+    _run_deploy()
+    for name in QUADLET_UNIT_NAMES:
+        assert (QUADLET_SYSTEM_DIR / name).exists()
+    _assert_all_services_active()
+    _wait_healthz(8080)
+    _wait_healthz(3000)
+    _wait_healthz(4040)
+
+
 if __name__ == "__main__":  # pragma: no cover
     # Convenience: ``python -m pytest tests/test_deploy_integration.py -m integration -s``
     raise SystemExit(pytest.main([__file__, "-m", "integration", "-s"]))
