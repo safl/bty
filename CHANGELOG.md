@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.8] - 2026-07-04
+
+### Fixed
+
+Third pass over the trio's audit sweep. Deploy tutorials still
+described the deploy as "bty + withcache" only; the Pass 1 port
+unification made nbdmux a first-class sidecar in the default
+install (deploy.py already emits its URL and installs its Quadlet
+unit). The `bty-lab-deploy.md`, `walkthrough-server-docker.md`, and
+`bty-netboot-pc.md` tutorials now name all three sidecars in their
+end-of-deploy blocks. `overview.md` said "two console-script entry
+points"; there are three (`bty`, `bty-web`, `bty-lab` per
+`pyproject.toml`).
+
+The TUI Panel that fires on `mode=exit` from the server still told
+the operator "boot_mode=sanboot or already provisioned"; the actual
+enum value has been `ipxe-exit` since v0.25.0, so an operator
+following the hint into the DB would hit an empty result set. Three
+schema/model doc-drift spots (v0.25.0 sanboot rename in `_db.py` +
+`MachineRow.sanboot_drive`, v0.59.0 oras rename in `_withcache.py`)
+finish the cleanup Pass 2 started.
+
 ## [0.65.7] - 2026-07-04
 
 ### Fixed
