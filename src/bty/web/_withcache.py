@@ -64,8 +64,9 @@ def is_cached(
     ``headers`` (optional) attaches request headers to the HEAD. From v0.4.0
     withcache forwards the client-supplied ``Authorization`` header into the
     background-fetch worker, so a consumer that has just minted an OCI
-    bearer (the bty oras case: a fresh anon token against ghcr.io for the
-    catalog entry's resolved blob URL) can warm a token-gated origin in
+    bearer (the ``withcache.oras`` case: a fresh anon token against
+    ghcr.io for the catalog entry's resolved blob URL) can warm a
+    token-gated origin in
     one probe. Cache hits are still served bearer-free (cached bytes never
     revisit the origin).
     """

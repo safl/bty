@@ -97,19 +97,23 @@ CREATE TABLE IF NOT EXISTS machines (
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
     last_seen_ip              TEXT,    -- source IP of most recent /pxe contact
     boot_mode               TEXT NOT NULL DEFAULT 'ipxe-exit',
-    -- iPXE BIOS drive the ``sanboot`` boot_mode boots (``0x80`` =
-    -- first disk). NULL = use the default (``0x80``). Distinct from
-    -- ``target_disk_serial``: iPXE picks local disks by BIOS drive
-    -- number, not by the Linux serial the flash step matches.
+    -- iPXE BIOS drive the ``ipxe-exit`` boot_mode boots on legacy
+    -- BIOS (``0x80`` = first disk). NULL = use the default
+    -- (``0x80``). Distinct from ``target_disk_serial``: iPXE picks
+    -- local disks by BIOS drive number, not by the Linux serial the
+    -- flash step matches. The ``sanboot`` in the column name is the
+    -- underlying iPXE verb (still emitted by ``ipxe_sanboot.j2`` on
+    -- BIOS); the boot-mode value was renamed to ``ipxe-exit`` in
+    -- v0.25.0.
     sanboot_drive             TEXT,
     last_flashed_at           TEXT,    -- updated by POST /pxe/{mac}/done
     -- One-shot state bit for the ``bty-flash-always`` loop-break.
     -- Armed (1) when the machine fetches a flash-chain artifact with
     -- ``?mac=`` (GET /boot/...?mac=X) -- positive proof it booted the
     -- flasher. Consumed (back to 0) by the next ``GET /pxe/{mac}``,
-    -- which serves a one-shot sanboot of the just-flashed disk instead
-    -- of reflashing; the next real netboot (no artifact fetch in
-    -- between) flips back to the flash chain. Confined to
+    -- which serves a one-shot ``ipxe-exit`` chain of the just-flashed
+    -- disk instead of reflashing; the next real netboot (no artifact
+    -- fetch in between) flips back to the flash chain. Confined to
     -- bty-flash-always machines (only that policy arms it).
     saw_flasher_boot          INTEGER NOT NULL DEFAULT 0,
     -- Per-machine disk inventory, posted by ``bty`` on startup via
