@@ -794,7 +794,7 @@ def create_app(
             if nbdmux_url and ref and ramboot_ready:
                 # Derive the NBD host from the configured HTTP control
                 # plane URL: same hostname, port 10809 (nbd-server's
-                # listener; bty-web posts exports against port 4040).
+                # listener; bty-web posts exports against port 8082).
                 parsed = urllib.parse.urlsplit(nbdmux_url)
                 nbd_host = parsed.hostname or host.split(":")[0]
                 template = jinja.get_template("ipxe_ramboot.j2")

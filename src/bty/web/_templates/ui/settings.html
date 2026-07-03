@@ -324,10 +324,10 @@
                 <label for="nbdmux_url" class="form-label">nbdmux URL</label>
                 <input type="url" class="form-control font-monospace" id="nbdmux_url"
                        name="nbdmux_url"
-                       placeholder="http://nbdmux:4040"
+                       placeholder="http://nbdmux:8082"
                        value="{{ nbdmux_url_override or '' }}">
                 <div class="form-text small">
-                    HTTP control plane of the nbdmux daemon (port 4040
+                    HTTP control plane of the nbdmux daemon (port 8082
                     by default). Empty disables ramboot; bty-web
                     rejects ``boot_mode=ramboot`` bindings in that
                     state. The NBD listener (port 10809) is derived

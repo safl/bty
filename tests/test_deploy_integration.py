@@ -21,7 +21,7 @@ regressions.
 Marked ``@pytest.mark.integration`` so it's opt-in. Skipped when:
 
 * podman or a compose backend is missing on PATH.
-* Any of the four sidecar ports (8080 / 3000 / 4040 / 10809) is
+* Any of the four sidecar ports (8080 / 8081 / 8082 / 10809) is
   already bound (the existing bty-web on the host, or any other
   conflicting process). The test refuses to fight an in-use port
   rather than silently failing.
@@ -40,7 +40,7 @@ import pytest
 
 # Ports the generated compose binds. Test skips if any are in use
 # at start-of-run.
-COMPOSE_PORTS = (8080, 3000, 4040, 10809)
+COMPOSE_PORTS = (8080, 8081, 8082, 10809)
 HEALTHZ_TIMEOUT = 60.0  # seconds to wait for each service's healthz
 
 
@@ -256,8 +256,8 @@ def test_deploy_purge_redeploy_lifecycle(deploy_dest: Path) -> None:
         # the original outage was about; the others are belt-and-
         # braces.
         _wait_healthz(8080)  # bty-web
-        _wait_healthz(3000)  # withcache
-        _wait_healthz(4040)  # nbdmux
+        _wait_healthz(8081)  # withcache
+        _wait_healthz(8082)  # nbdmux
         services = _running_services(deploy_dest)
         assert any("bty-web" in s for s in services), services
         assert any("withcache" in s for s in services), services
@@ -279,8 +279,8 @@ def test_deploy_purge_redeploy_lifecycle(deploy_dest: Path) -> None:
     _compose_up(deploy_dest)
     try:
         _wait_healthz(8080)
-        _wait_healthz(3000)
-        _wait_healthz(4040)
+        _wait_healthz(8081)
+        _wait_healthz(8082)
         services = _running_services(deploy_dest)
         assert any("bty-web" in s for s in services)
         assert any("withcache" in s for s in services)
@@ -472,8 +472,8 @@ def test_deploy_purge_redeploy_quadlet_lifecycle(
     # produces no visible container between Restart cycles; only
     # journalctl carries the crash reason.
     _wait_healthz(8080, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # bty-web
-    _wait_healthz(3000, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # withcache
-    _wait_healthz(4040, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # nbdmux
+    _wait_healthz(8081, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # withcache
+    _wait_healthz(8082, timeout=120.0, extra_diagnostics=_quadlet_diagnostics())  # nbdmux
 
     # Round 2: purge, then verify the deploy path is undone.
     deploy_mod.purge_main([str(quadlet_deploy_dest), "--all", "--yes"])
@@ -492,8 +492,8 @@ def test_deploy_purge_redeploy_quadlet_lifecycle(
         assert (QUADLET_SYSTEM_DIR / name).exists()
     _assert_all_services_active()
     _wait_healthz(8080)
-    _wait_healthz(3000)
-    _wait_healthz(4040)
+    _wait_healthz(8081)
+    _wait_healthz(8082)
 
 
 if __name__ == "__main__":  # pragma: no cover

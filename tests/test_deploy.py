@@ -261,20 +261,20 @@ def test_systemd_nbdmux_quadlet_has_ports_volumes_and_withcache_url(
 ) -> None:
     """The Quadlet path missed nbdmux entirely in v0.62-v0.65.2, so a
     system install (bty-lab deploy as root) came up without ramboot
-    at all - nothing on 4040 or 10809. Guard the shape of the emitted
+    at all - nothing on 8082 or 10809. Guard the shape of the emitted
     unit: image ref, published ports, bind-mounts, and the
     NBDMUX_WITHCACHE_URL wired to host.containers.internal (Quadlet
-    has no shared compose network, so it can't use 'withcache:3000')."""
+    has no shared compose network, so it can't use 'withcache:8081')."""
     dest = tmp_path / "bty-host"
     deploy_mod.init_main([str(dest), "--systemd"])
     nbdmux = (dest / "quadlet" / "nbdmux.container").read_text(encoding="utf-8")
     assert "Image=ghcr.io/safl/nbdmux:latest" in nbdmux
-    assert "PublishPort=4040:4040" in nbdmux
+    assert "PublishPort=8082:8082" in nbdmux
     assert "PublishPort=10809:10809" in nbdmux
     data_abs = (dest / "data").resolve()
     assert f"Volume={data_abs}/nbdmux:/data:Z" in nbdmux
     assert f"Volume={data_abs}/nbdmux/images:/images:Z" in nbdmux
-    assert "Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:3000" in nbdmux
+    assert "Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:8081" in nbdmux
 
 
 def test_quadlet_service_set_matches_across_all_four_sites(tmp_path: Path) -> None:
@@ -543,7 +543,7 @@ def test_deploy_as_root_does_system_install(
     + Quadlet units installed + systemctl daemon-reload + service start.
 
     Critical: root mode must NOT ``compose up -d``. The Quadlet-managed
-    services bind the same ports (8080/3000/69); running both at once
+    services bind the same ports (8080/8081/8082/69); running both at once
     blocks systemctl start with "port already in use" (v0.41.1 bug)."""
     dest = tmp_path / "bty-host"
     deploy_mod.deploy_main([str(dest)])  # _patched_runtime fakes geteuid==0

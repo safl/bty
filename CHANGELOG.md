@@ -9,6 +9,25 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.5] - 2026-07-03
+
+### Changed
+
+Unified the ecosystem sidecar ports onto the consecutive
+`8080/8081/8082` range: bty-web stays at `8080`, withcache moves
+from `3000` to `8081`, nbdmux HTTP moves from `4040` to `8082`.
+The NBD wire port (`10809`, IANA-registered) is unchanged. The
+compose emitter, both Quadlet units, `bty.toml`, `envvars`, the
+post-deploy summary, and the Settings-page placeholder all
+reflect the new scheme; the integration-test port tuple picks
+up the same three.
+
+Existing deploys need `bty-lab upgrade /opt/bty` to pick up the
+new ports; the LAN address in bookmarks and firewall rules
+changes from `:3000`/`:4040` to `:8081`/`:8082` for withcache and
+nbdmux. Pre-1.0 policy is break-freely, so no compat shim is
+shipped.
+
 ## [0.65.4] - 2026-07-03
 
 ### Changed

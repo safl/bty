@@ -8,7 +8,7 @@
 #   cp envvars.example envvars && "${EDITOR:-vi}" envvars   # set passwords
 #   "${EDITOR:-vi}" bty.toml                                # set [withcache] url etc.
 #   podman compose --env-file envvars up -d
-#   #   http://<host>:8080/ui   (bty)      http://<host>:3000/   (withcache)
+#   #   http://<host>:8080/ui   (bty)      http://<host>:8081/   (withcache)
 #
 #   # add TFTP for BIOS clients that bootstrap over it:
 #   podman compose --env-file envvars --profile tftp up -d
@@ -29,17 +29,17 @@ services:
     dns:
       - ${BTY_DNS:-1.1.1.1}
     ports:
-      - "3000:3000"
+      - "8081:8081"
     environment:
       WITHCACHE_ADMIN_PASSWORD: ${WITHCACHE_ADMIN_PASSWORD:?set in envvars}
     # Cap the cache (delete artifacts in the UI to free space when full):
-    # command: ["withcache-server","--host","0.0.0.0","--port","3000",
+    # command: ["withcache-server","--host","0.0.0.0","--port","8081",
     #           "--data-dir","/data","--max-bytes","100G"]
     volumes:
       - ${BTY_HOST_DATA_DIR:-./data}/withcache:/data
 
   # nbdmux sidecar serves catalog images over NBD for bty's ramboot
-  # boot mode. Port 4040 is the HTTP control plane (bty-web POSTs
+  # boot mode. Port 8082 is the HTTP control plane (bty-web POSTs
   # exports to it on the pre-warm path); port 10809 is the NBD
   # listener that targets connect to from their initramfs.
   # Persistent state under data/nbdmux; decompressed image files
@@ -55,14 +55,14 @@ services:
     dns:
       - ${BTY_DNS:-1.1.1.1}
     ports:
-      - "4040:4040"
+      - "8082:8082"
       - "10809:10809"
     environment:
       NBDMUX_ADMIN_PASSWORD: ${NBDMUX_ADMIN_PASSWORD:?set in envvars}
       # The warmer pipeline (v0.2.0+) fetches src_urls through this
       # withcache; pointing at the in-stack sidecar means ramboot
       # warm POSTs benefit from the same LAN cache as the flash path.
-      NBDMUX_WITHCACHE_URL: http://withcache:3000
+      NBDMUX_WITHCACHE_URL: http://withcache:8081
     volumes:
       - ${BTY_HOST_DATA_DIR:-./data}/nbdmux:/data
       - ${BTY_HOST_DATA_DIR:-./data}/nbdmux/images:/images

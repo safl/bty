@@ -804,7 +804,7 @@ def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
     # Pin a withcache URL via the override key.
-    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
     # Force is_cached -> True without standing up a stub server.
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)
 
@@ -832,7 +832,7 @@ def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
     assert plan["mode"] == "flash"
     # Plan rewrites to withcache's ``/b/<urlsafe-b64(origin)>/<basename>``.
-    assert plan["image"].startswith("http://cache.invalid:3000/b/")
+    assert plan["image"].startswith("http://cache.invalid:8081/b/")
     assert plan["image"].endswith("/demo.img.gz")
     # Observability: the plan event records the withcache decision so the
     # operator can see in /ui/events that the boot streamed from cache.
@@ -864,7 +864,7 @@ def test_pxe_plan_flash_records_origin_when_withcache_misses(
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
-    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: False)  # cold
 
     r = app_client.post(
@@ -918,7 +918,7 @@ def test_pxe_plan_flash_uses_warm_withcache_even_when_resolved_src_null(
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
-    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)  # warm
 
     r = app_client.post(
@@ -954,7 +954,7 @@ def test_pxe_plan_flash_uses_warm_withcache_even_when_resolved_src_null(
     plan = app_client.get(f"/pxe/{mac}/plan", headers={"Host": "bty.local:8080"}).json()
     # Served from withcache despite resolved_src being NULL (regression guard
     # for the spurious `and resolved_src` gate on the netboot cache lookup).
-    assert plan["image"].startswith("http://cache.invalid:3000/b/")
+    assert plan["image"].startswith("http://cache.invalid:8081/b/")
     assert plan["image"].endswith("/nullres.img.gz")
     events = app_client.get(
         "/events",
@@ -980,7 +980,7 @@ def test_catalog_toml_rewrites_srcs_through_withcache_when_configured(
 
     from bty.web import _settings_store
 
-    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:3000")
+    monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
 
     # Use the JSON catalog-add API to seed two entries: one https,
     # one oras. The endpoint validates the URLs + resolves digests
@@ -1036,8 +1036,8 @@ def test_catalog_toml_rewrites_srcs_through_withcache_when_configured(
     assert https_src not in body, "https src must be rewritten through withcache"
     assert oras_src not in body, "oras src must be rewritten through withcache"
     # Both must appear under the withcache prefix with the right b64 token.
-    assert f"http://cache.invalid:3000/b/{_b64(https_src)}/" in body
-    assert f"http://cache.invalid:3000/b/{_b64(oras_src)}/" in body
+    assert f"http://cache.invalid:8081/b/{_b64(https_src)}/" in body
+    assert f"http://cache.invalid:8081/b/{_b64(oras_src)}/" in body
 
 
 def test_pxe_plan_flash_policy_without_target_falls_back_to_interactive(
@@ -1358,7 +1358,7 @@ def test_pxe_ramboot_emits_ramboot_template_when_configured(
     reports the export ready emits the ramboot iPXE template with
     the bty.* params the initramfs consumes (nbd endpoint, image
     ref, overlay size)."""
-    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
     ref = "a" * 64
     _mock_nbdmux_ready(monkeypatch, ref)
     app_client.put(
@@ -1390,7 +1390,7 @@ def test_ramboot_bind_rejected_when_ref_not_in_nbdmux(
     The operator gets a 422 with a helpful message instead of a
     half-configured machine record that would fail at PXE chain
     time."""
-    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
     # Mock returns empty -> the ref isn't registered.
     from nbdmux import client as nbdmux_client
 
@@ -1432,7 +1432,7 @@ def test_pxe_ramboot_falls_back_to_tui_without_ref(
     """boot_mode=ramboot without a ref escapes the bind-time gate
     (which only triggers when both are set) and falls back to
     ipxe_tui at PXE chain time."""
-    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:ad",
         json={"boot_mode": "ramboot"},
@@ -1452,7 +1452,7 @@ def test_pxe_ramboot_falls_back_when_export_drops_post_bind(
     and PXE chain. The chain-time check sees the ref absent and
     falls back to ipxe_tui rather than chaining into a missing
     export."""
-    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:4040")
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
     ref = "f" * 64
     from nbdmux import client as nbdmux_client
 

@@ -74,7 +74,7 @@ ENV_WITHCACHE_URL = "BTY_WITHCACHE_URL"
 # Optional nbdmux daemon. When set, bty's ``boot_mode=ramboot`` uses
 # it as the NBD-export multiplexer that serves catalog images over
 # the network for in-place ramboot. The value is the HTTP control
-# plane URL (e.g. ``http://nbdmux:4040``); bty derives the NBD
+# plane URL (e.g. ``http://nbdmux:8082``); bty derives the NBD
 # endpoint from the same host on port 10809. Resolves override ->
 # env -> unset, same shape as ``KEY_WITHCACHE_URL``.
 KEY_NBDMUX_URL = "nbdmux.url"

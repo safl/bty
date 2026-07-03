@@ -30,7 +30,7 @@ shot. No clone needed; `uv` (or `pipx`) on the host is enough:
 
 ```bash
 sudo uvx bty-lab deploy /opt/bty
-#   bty: :8080/ui  withcache: :3000/   (login: bty-lab / bty-lab)
+#   bty: :8080/ui  withcache: :8081/   (login: bty-lab / bty-lab)
 ```
 
 `deploy` detects install mode from your euid: as root, the full system
