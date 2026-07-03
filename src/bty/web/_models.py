@@ -25,7 +25,13 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 
 # Boot-mode values: what ``GET /pxe/{mac}`` returns.
 #
-# - ``sanboot`` boots the local disk, firmware-aware: on UEFI it
+# Since v0.25.0, ``boot_mode`` is a stable per-machine policy that is
+# never mutated by the completion signal; the flash-once versus
+# flash-always distinction is derived from ``saw_flasher_boot`` +
+# ``last_flashed_at`` at plan-emit time. See ``_app.py`` for the state
+# machine.
+#
+# - ``ipxe-exit`` boots the local disk, firmware-aware: on UEFI it
 #   ``exit``s to the firmware boot order (which boots the disk's EFI
 #   loader -- UEFI has no BIOS INT13 drive map for ``sanboot --drive``);
 #   on legacy BIOS it emits ``sanboot --drive <sanboot_drive>`` (default
@@ -34,40 +40,38 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   and the explicit-PUT default. The drive is a per-machine override
 #   (``sanboot_drive``); iPXE selects by BIOS drive number, not by
 #   Linux serial. (There is no separate ``local`` policy: a bare
-#   ``exit`` is just ``sanboot``'s fallback, and the no-assignment /
-#   error paths emit it internally.)
+#   ``exit`` is just ``ipxe-exit``'s fallback, and the no-assignment /
+#   error paths emit it internally.) The "sanboot" name in the iPXE
+#   verb and in ``sanboot_drive`` reflects the underlying iPXE command;
+#   the boot-mode value was renamed to ``ipxe-exit`` in v0.25.0 so it
+#   describes what the mode does rather than which iPXE verb it emits.
 # - ``bty-flash-always`` returns the live-env chain so the box
-#   re-flashes itself, then sanboots the just-flashed disk before the
-#   next reflash (per-job CI cadence; see ``saw_flasher_boot``).
+#   re-flashes itself, then boots the just-flashed disk (via
+#   ``ipxe-exit`` semantics) before the next reflash (per-job CI
+#   cadence; see ``saw_flasher_boot``).
 # - ``bty-flash-once`` returns the live-env flash chain just like
 #   ``bty-flash-always``, but the completion signal
-#   (``POST /pxe/{mac}/done``) flips the policy to ``sanboot`` so the
-#   box boots its freshly-flashed disk and stops re-flashing. For "I
-#   want this machine reimaged now, then leave it alone" -- distinct
-#   from ``bty-flash-always`` which reimages on every netboot cycle.
+#   (``POST /pxe/{mac}/done``) sets ``saw_flasher_boot`` +
+#   ``last_flashed_at`` so subsequent plan-emits observe the machine
+#   as flashed and return the ``ipxe-exit`` chain instead. The
+#   ``boot_mode`` value itself stays ``bty-flash-once`` and the
+#   next explicit reflash request (bty-web UI or PUT) is what flips
+#   the machine back onto the live env.
 # - ``bty-tui`` returns the live-env chain. ``bty`` on tty1 GETs
 #   /pxe/<mac>/plan and (for boot_mode=bty-tui) drops the operator
 #   into the wizard so they can pick an image from the server's
 #   catalog by hand.
 # - ``bty-inventory`` is to inventory what ``bty-flash-always`` is
-#   to flashing: it alternates an inventory boot then a sanboot across
-#   PXE contacts (same ``saw_flasher_boot`` mechanism). The active boot
-#   chains the live env in the ``inventory`` plan mode -- ``bty`` posts
-#   /pxe/<mac>/inventory and reboots (no flash, no wizard) -- and the
-#   next contact sanboots the disk. So every power cycle re-collects
-#   the disk inventory before booting, surfacing swapped hardware. This
-#   is the auto-discovery default for unknown MACs: a new box self-
-#   reports its disks and then just boots, ready for the operator to
-#   assign a flash policy from the now-populated inventory.
-#
-# The ``bty-*`` prefix marks the policies that PXE-boot into bty's own
-# live env; ``sanboot`` boots the local disk.
-#
-# Completion signal (``POST /pxe/{mac}/done``) updates
-# ``last_flashed_at`` regardless of policy; it only mutates
-# ``boot_mode`` for ``bty-flash-once`` (-> ``sanboot``).
-# ``bty-flash-always`` is unchanged so the per-job CI cadence reflashes
-# every cycle.
+#   to flashing: it alternates an inventory boot then a disk boot
+#   across PXE contacts (same ``saw_flasher_boot`` mechanism). The
+#   active boot chains the live env in the ``inventory`` plan mode --
+#   ``bty`` posts /pxe/<mac>/inventory and reboots (no flash, no
+#   wizard) -- and the next contact returns the ``ipxe-exit`` chain.
+#   So every power cycle re-collects the disk inventory before booting,
+#   surfacing swapped hardware. This is the auto-discovery default for
+#   unknown MACs: a new box self-reports its disks and then just boots,
+#   ready for the operator to assign a flash policy from the now-
+#   populated inventory.
 # - ``ramboot`` mounts the bound catalog image over NBD (served by
 #   the sidecar ``nbdmux`` daemon) and pivots into it with
 #   overlayfs over tmpfs for writes. The disk is never touched.
@@ -78,6 +82,13 @@ MAC_PATTERN = r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$"
 #   been pre-warmed (decompressed and registered as an NBD export).
 #   /pxe/{mac}/plan rejects with mode=interactive + a reason when
 #   either gate is open.
+#
+# The ``bty-*`` prefix marks the policies that PXE-boot into bty's own
+# live env; ``ipxe-exit`` and ``ramboot`` do not chain the live env.
+#
+# Completion signal (``POST /pxe/{mac}/done``) updates
+# ``last_flashed_at`` and ``saw_flasher_boot`` regardless of policy;
+# it does not mutate ``boot_mode``.
 BOOT_MODES = (
     "ipxe-exit",
     "bty-flash-always",
@@ -118,7 +129,8 @@ class MachineUpsert(BaseModel):
     """Request body for ``PUT /machines/{mac}``.
 
     All fields are optional except for the implicit ``mac`` from the
-    path; ``boot_mode`` defaults to ``"sanboot"``. Binding targets
+    path; ``boot_mode`` defaults to ``DEFAULT_BOOT_MODE`` (currently
+    ``"ipxe-exit"``, the disk-boot policy). Binding targets
     ``bty_image_ref`` (a stable provenance ID derived as
     ``sha256(canonicalise_src(src))``) rather than the content sha,
     so URL-only and rolling-tag oras entries are bindable; rename or
