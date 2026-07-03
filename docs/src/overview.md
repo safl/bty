@@ -55,8 +55,8 @@ FOG, iVentoy, and others.
 ## Components
 
 bty is one Python package - the `bty` module, distributed on PyPI as
-[`bty-lab`](https://pypi.org/project/bty-lab/) - with two console-script
-entry points, plus a sibling media builder:
+[`bty-lab`](https://pypi.org/project/bty-lab/) - with three console-script
+entry points (`bty`, `bty-web`, `bty-lab`), plus a sibling media builder:
 
 - `bty` - the operator-facing wizard (Rich-based) + library.
   ``--catalog SOURCE`` (a local TOML path, HTTP URL, or ``oras://``
