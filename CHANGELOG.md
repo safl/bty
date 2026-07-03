@@ -9,6 +9,18 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.6] - 2026-07-03
+
+### Fixed
+
+Two docs/reference cleanups from the audit sweep of the trio. The
+Manifest sha docstring in `bty.catalog` still mentioned bty-web's
+`/images` proxy, which was removed in v0.60.0 when the withcache
+sidecar took over as the bytes path. The standalone reference
+Quadlet at `deploy/quadlet/withcache.container` was left on the
+pre-8080-series `PublishPort=3000:3000`; the runtime deploy.py
+generator already uses `8081`.
+
 ## [0.65.5] - 2026-07-03
 
 ### Changed
