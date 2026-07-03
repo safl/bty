@@ -129,7 +129,11 @@ template iff:
 
 - `boot_mode=ramboot` on the machine row, AND
 - nbdmux URL is configured, AND
-- the bound ref's `ramboot_cache.status='ready'`.
+- the bound ref's nbdmux export is reported as `status='ready'` by
+  the nbdmux daemon (bty polls via `nbdmux_client.list_exports`
+  at plan-emit time; nbdmux owns the warm pipeline end-to-end
+  since v0.65.0, so bty no longer keeps its own `ramboot_cache`
+  table).
 
 If any gate is open, the chain falls back to `bty-tui` so the
 operator sees the wizard rather than the box panicking in the
