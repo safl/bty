@@ -24,13 +24,14 @@ of three ways:
 
 ## Quick start -- the canonical container deploy
 
-`uvx bty-lab deploy` writes the compose stack (bty-web + withcache, plus
-an optional TFTP sidecar), auto-fills envvars, and brings it up in one
-shot. No clone needed; `uv` (or `pipx`) on the host is enough:
+`uvx bty-lab deploy` writes the compose stack (bty-web + withcache +
+nbdmux, plus an optional TFTP sidecar), auto-fills envvars, and brings
+it up in one shot. No clone needed; `uv` (or `pipx`) on the host is
+enough:
 
 ```bash
 sudo uvx bty-lab deploy /opt/bty
-#   bty: :8080/ui  withcache: :8081/   (login: bty-lab / bty-lab)
+#   bty: :8080/ui  withcache: :8081/  nbdmux: :8082/   (login: bty-lab / bty-lab)
 ```
 
 `deploy` detects install mode from your euid: as root, the full system
