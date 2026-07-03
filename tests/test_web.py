@@ -2998,9 +2998,9 @@ def test_catalog_entry_add_oras_populates_resolved_src_with_blob_url(
 ) -> None:
     """An oras catalog entry's ``resolved_src`` carries the canonical
     ``https://<host>/v2/<repo>/blobs/sha256:<digest>`` URL produced by
-    ``bty.oras.resolve_ref`` at import time. Withcache sees a plain
-    HTTPS URL it can warm against; nothing downstream needs to know
-    the source was ``oras://``."""
+    ``withcache.oras.resolve_ref`` at import time. Withcache sees a
+    plain HTTPS URL it can warm against; nothing downstream needs to
+    know the source was ``oras://``."""
     from withcache import oras as _oras
 
     blob_url = "https://ghcr.io/v2/safl/nosi/freebsd-14-headless/blobs/sha256:abc123"
