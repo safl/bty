@@ -9,6 +9,22 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.4] - 2026-07-03
+
+### Changed
+
+Unified the accent-strip gradient with nbdmux and withcache so
+all three consoles share the same visual family, and shifted the
+bty-web primary from Bootstrap default blue (`#0d6efd`) to
+navy-blue (`#0d3585`) for tonal harmony with dark-magenta
+(withcache) and magenta (nbdmux). Operators moving between the
+three consoles now see the same Bootstrap 5 grammar with the
+primary hue telling them which service they are on: bty is the
+navy anchor, withcache the dark-magenta middle, nbdmux the
+magenta terminus (visible runtime). The .bty-accent strip now
+carries the navy -> dark-magenta -> magenta gradient across all
+three services.
+
 ## [0.65.3] - 2026-07-01
 
 ### Fixed
