@@ -657,16 +657,21 @@ def create_app(
         #   - bty-tui                       -> live env, interactive wizard
         #   - sanboot                       -> iPXE sanboot the local disk
         #   - bty-flash-always / -once + ref + target disk -> live env auto-flash
-        #     EXCEPT bty-flash-always with saw_flasher_boot set -> sanboot
-        #     the just-flashed disk once (one-shot loop-break, see below)
+        #     EXCEPT bty-flash-always with saw_flasher_boot set -> the
+        #     ipxe-exit chain once (one-shot loop-break, see below), so
+        #     the just-flashed disk boots between reflashes.
         #   - else (no usable binding / stale policy) -> ipxe_unknown.j2
         #     (sanboot 0x80 || exit)
         # Completion signal (POST /pxe/{mac}/done) updates
-        # last_flashed_at always, and flips bty-flash-once -> sanboot so
-        # the box boots its freshly-flashed disk and stops reflashing.
-        # bty-flash-always never changes policy; instead it alternates
-        # flash-chain -> sanboot -> flash-chain across boots so the
-        # just-flashed disk actually boots once before the next reflash.
+        # last_flashed_at + saw_flasher_boot regardless of policy;
+        # boot_mode itself is not mutated (as of v0.25.0). For
+        # bty-flash-once the next plan-emit observes the machine as
+        # flashed and returns the ipxe-exit chain instead of the flash
+        # chain, so the box boots its freshly-flashed disk. For
+        # bty-flash-always the same saw_flasher_boot bit drives the
+        # one-shot loop-break above: alternates flash-chain and
+        # ipxe-exit across boots so the just-flashed disk actually
+        # boots once before the next reflash.
         # The flip is driven by ``saw_flasher_boot``: armed when the box
         # fetches a /boot artifact (proof it booted the flasher),
         # consumed here on the following /pxe contact. Without this,
@@ -2031,13 +2036,13 @@ def create_app(
                     -- mirrored across last_flashed_at + known_disks_at
                     -- below because those completion signals belong
                     -- to the OLD cycle. Pre-fix, an operator rebinding
-                    -- a flashed machine (e.g. flash-once -> sanboot
+                    -- a flashed machine (e.g. flash-once -> ipxe-exit
                     -- -> flash-once for a fresh flash) left
                     -- last_flashed_at intact -- so a future crashed
                     -- flasher cycle that armed the bit but never
                     -- /done'd would still see has_flashed=True and
-                    -- the /pxe consume would sanboot the
-                    -- half-flashed disk. Clearing the completion
+                    -- the /pxe consume would boot the disk (via
+                    -- ipxe-exit) half-flashed. Clearing the completion
                     -- signal on policy change closes that hole.
                     saw_flasher_boot   = CASE
                         WHEN machines.boot_mode != excluded.boot_mode THEN 0
