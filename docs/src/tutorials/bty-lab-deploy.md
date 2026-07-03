@@ -63,11 +63,12 @@ installs Podman Quadlet units to `/etc/containers/systemd/`,
 and starts the services via `systemctl`. Stack survives host
 reboots.
 
-End-of-deploy output points at the two URLs:
+End-of-deploy output points at the three URLs:
 
 ```text
 bty:       http://<host>:8080/ui     (login: bty-lab / bty-lab)
 withcache: http://<host>:8081/       (login: bty-lab / bty-lab)
+nbdmux:    http://<host>:8082/       (login: bty-lab / bty-lab)
 ```
 
 Change the passwords in `/opt/bty/envvars` before exposing past
@@ -77,7 +78,9 @@ a trusted LAN.
 
 ```bash
 curl -fsS http://localhost:8080/healthz   # bty-web up
-sudo systemctl status bty-web withcache    # systemd green
+curl -fsS http://localhost:8081/healthz   # withcache up
+curl -fsS http://localhost:8082/healthz   # nbdmux up
+sudo systemctl status bty-web withcache nbdmux    # systemd green
 ```
 
 Open `http://<host>:8080/ui` in a browser, log in with
