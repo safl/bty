@@ -8,7 +8,7 @@ Wants=network-online.target
 [Container]
 Image=ghcr.io/safl/withcache:latest
 AutoUpdate=registry
-PublishPort=3000:3000
+PublishPort=8081:8081
 Volume=withcache-data:/data
 Environment=WITHCACHE_ADMIN_PASSWORD=bty-lab
 
