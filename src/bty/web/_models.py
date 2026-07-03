@@ -247,8 +247,8 @@ class Machine(BaseModel):
     last_seen_at: datetime | None = None
     last_seen_ip: str | None = None
     boot_mode: str = Field(default=DEFAULT_BOOT_MODE, pattern=BOOT_MODE_PATTERN)
-    # iPXE BIOS drive the ``sanboot`` policy boots; ``None`` = default
-    # (``0x80``). See ``MachineUpsert.sanboot_drive``.
+    # iPXE BIOS drive the ``ipxe-exit`` policy boots on legacy BIOS;
+    # ``None`` = default (``0x80``). See ``MachineUpsert.sanboot_drive``.
     sanboot_drive: str | None = Field(default=None, pattern=SANBOOT_DRIVE_PATTERN)
     last_flashed_at: datetime | None = None
     # JSON-decoded inventory from the most recent
