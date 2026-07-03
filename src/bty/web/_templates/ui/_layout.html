@@ -8,13 +8,40 @@
     <link rel="stylesheet" href="/static/bootstrap.min.css">
     <link rel="stylesheet" href="/static/bootstrap-icons.min.css">
     <style>
+        /* Palette anchor for the three-service trio (bty navy,
+           withcache dark-magenta, nbdmux magenta). Bootstrap 5
+           exposes --bs-primary + a matching -rgb triplet used
+           for translucent variants (alerts, focus rings,
+           .bg-*-subtle). Overriding both here re-tints every
+           stock component without patching bootstrap.min.css. */
+        :root {
+            --bs-primary: #0d3585;
+            --bs-primary-rgb: 13, 53, 133;
+            --bs-link-color: #0d3585;
+            --bs-link-hover-color: #0a2b6d;
+        }
+        .btn-primary {
+            --bs-btn-bg: #0d3585;
+            --bs-btn-border-color: #0d3585;
+            --bs-btn-hover-bg: #0a2b6d;
+            --bs-btn-hover-border-color: #0a2b6d;
+            --bs-btn-active-bg: #0a2b6d;
+            --bs-btn-active-border-color: #0a2b6d;
+        }
+        .bg-primary { --bs-bg-opacity: 1; background-color: #0d3585 !important; }
+        .text-primary { --bs-text-opacity: 1; color: #0d3585 !important; }
+        .border-primary { --bs-border-opacity: 1; border-color: #0d3585 !important; }
         /* Brand strip: a thin gradient accent above the navbar.
            Stable across themes; defined inline rather than in
            bootstrap.min.css so it renders even when the CSS
-           load races the initial paint. */
+           load races the initial paint. Shared navy ->
+           dark-magenta -> magenta gradient across bty (navy),
+           withcache (dark-magenta) and nbdmux (magenta) so the
+           trio reads as one product family from any of the
+           three consoles. */
         .bty-accent {
             height: 3px;
-            background: linear-gradient(90deg, #0d6efd 0%, #6610f2 50%, #d63384 100%);
+            background: linear-gradient(90deg, #0d3585 0%, #8f1b71 50%, #d63384 100%);
         }
         /* The accent + navbar + sub-nav pin to the top as one unit so
            the worker indicators and sub-nav jump links stay visible
@@ -56,13 +83,13 @@
             transition: background-color 0.15s;
         }
         .navbar-brand.brand-active {
-            background-color: rgba(13, 110, 253, 0.85);
+            background-color: rgba(13, 53, 133, 0.85);
         }
         .navbar-brand:hover {
             background-color: rgba(255, 255, 255, 0.06);
         }
         .navbar-brand.brand-active:hover {
-            background-color: rgba(13, 110, 253, 0.95);
+            background-color: rgba(13, 53, 133, 0.95);
         }
         /* Version sits in the navbar alongside the brand pill but
            OUTSIDE it -- so the BTY button stays a clean click
@@ -103,9 +130,9 @@
             color: #fff;
         }
         .navbar .nav-btn.active {
-            background-color: #0d6efd;
+            background-color: #0d3585;
             color: #fff;
-            box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.6);
+            box-shadow: 0 0 0 1px rgba(13, 53, 133, 0.6);
         }
         .navbar .nav-btn i {
             font-size: 1.05rem;
@@ -194,8 +221,8 @@
            untouched by the shadow utilities and follows the card's
            border-radius in modern browsers. */
         @keyframes bty-jump-flash {
-            0%   { outline: 3px solid rgba(13, 110, 253, 0.7); outline-offset: 2px; }
-            100% { outline: 3px solid rgba(13, 110, 253, 0); outline-offset: 2px; }
+            0%   { outline: 3px solid rgba(13, 53, 133, 0.7); outline-offset: 2px; }
+            100% { outline: 3px solid rgba(13, 53, 133, 0); outline-offset: 2px; }
         }
         .bty-jump-flash {
             animation: bty-jump-flash 1s ease-out;
@@ -337,7 +364,7 @@
         }
         .subnav-strip .nav-pills .nav-link.active {
             color: #fff;
-            background-color: #0d6efd;
+            background-color: #0d3585;
         }
         /* Right-aligned meta blob: pages pass ``text-muted small``
            etc. via the ``right_html`` slot; rebase those colours
@@ -411,9 +438,9 @@
            ``.nav-btn.active`` treatment above. */
         .nav-worker.active {
             color: #fff;
-            background-color: #0d6efd;
+            background-color: #0d3585;
             border-radius: 0.5rem;
-            box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.6);
+            box-shadow: 0 0 0 1px rgba(13, 53, 133, 0.6);
         }
         .nav-worker-badge {
             position: absolute;
