@@ -9,6 +9,30 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.7] - 2026-07-04
+
+### Fixed
+
+Doc-drift sweep from the second audit pass across the trio. The
+BOOT_MODES reference comment in `bty.web._models` still called
+BOOT_MODES[0] "sanboot" and claimed the completion signal flipped
+`bty-flash-once` to `sanboot`; both are pre-v0.25.0 artefacts.
+Since v0.25.0 `boot_mode` is a stable per-machine policy and the
+flash-once vs flash-always distinction is derived from
+`saw_flasher_boot` + `last_flashed_at` at plan-emit time. Two
+matching stale comments in `_app.py` and MachineUpsert's docstring
+default (which claimed `sanboot` but is `ipxe-exit`) followed the
+same fix.
+
+The ramboot walkthrough listed the third readiness gate as the
+bound ref's `ramboot_cache.status='ready'`, but the ramboot_cache
+table was dropped in v0.65.0 when nbdmux took over the warm
+pipeline; bty polls `nbdmux_client.list_exports` instead. The
+walkthrough now describes that.
+
+One test docstring called the oras resolver `bty.oras.resolve_ref`
+where the body imports `withcache.oras` (post-v0.59.0 rename).
+
 ## [0.65.6] - 2026-07-03
 
 ### Fixed
