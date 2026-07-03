@@ -69,9 +69,9 @@ class CatalogEntry:
     files served from a CDN).
 
     ``sha256`` is optional in the schema. Both ``bty --catalog``
-    (portable catalog: display + flash from src) and bty-web's
-    /images proxy flash from ``src`` without ever requiring a
-    sha. Digest verification happens at flash time for ``oras://``
+    (portable catalog: display + flash from src) and the withcache
+    sidecar flash from ``src`` without ever requiring a sha.
+    Digest verification happens at flash time for ``oras://``
     (the manifest layer digest is the URL); for ``http(s)://`` TLS
     is the in-flight guarantee. When ``sha256`` is set, the flash
     verifies the streamed bytes against it on the wire (see
