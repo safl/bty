@@ -99,7 +99,7 @@ def _compose_yaml(version: str) -> str:
 #   "${{EDITOR:-vi}}" envvars                                  # set HOST_ADDR + passwords
 #   export COMPOSE_ENV_FILES=envvars                           # once per shell, then:
 #   podman compose up -d                                       # bty:       http://<host>:8080/ui
-#                                                              # withcache: http://<host>:3000/
+#                                                              # withcache: http://<host>:8081/
 #
 # (Without the export, pass --env-file envvars on every compose call.)
 #
@@ -125,14 +125,14 @@ services:
     dns:
       - ${{BTY_DNS:-1.1.1.1}}
     ports:
-      - "3000:3000"
+      - "8081:8081"
     environment:
       WITHCACHE_ADMIN_PASSWORD: ${{WITHCACHE_ADMIN_PASSWORD:?set in envvars}}
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/withcache:/data
 
   # nbdmux sidecar serves catalog images over NBD for bty's ramboot
-  # boot mode. Port 4040 is the HTTP control plane (bty-web POSTs
+  # boot mode. Port 8082 is the HTTP control plane (bty-web POSTs
   # exports on the pre-warm path); port 10809 is the NBD listener
   # that ramboot targets connect to from their initramfs. The images
   # dir is bind-mounted into BOTH containers so bty-web's decompress
@@ -143,14 +143,14 @@ services:
     dns:
       - ${{BTY_DNS:-1.1.1.1}}
     ports:
-      - "4040:4040"
+      - "8082:8082"
       - "10809:10809"
     environment:
       NBDMUX_ADMIN_PASSWORD: ${{NBDMUX_ADMIN_PASSWORD:?set in envvars}}
       # The warmer pipeline (nbdmux v0.2.0+) fetches src_urls through
       # this withcache; pointing at the in-stack sidecar means ramboot
       # warm POSTs benefit from the same LAN cache as the flash path.
-      NBDMUX_WITHCACHE_URL: http://withcache:3000
+      NBDMUX_WITHCACHE_URL: http://withcache:8081
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux:/data
       - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux/images:/images
@@ -212,8 +212,8 @@ HOST_ADDR=10.0.0.5
 # exposing the host past a trusted LAN.
 #
 #   bty-web operator UI: http://<host>:8080/ui
-#   withcache UI:        http://<host>:3000/
-#   nbdmux UI:           http://<host>:4040/
+#   withcache UI:        http://<host>:8081/
+#   nbdmux UI:           http://<host>:8082/
 #
 # nbdmux's NBD port (10809) is unauthenticated regardless of
 # NBDMUX_ADMIN_PASSWORD; firewall it to the lab's LAN.
@@ -317,7 +317,7 @@ cp envvars.example envvars
 export COMPOSE_ENV_FILES=envvars
 
 podman compose up -d                            # bty:       http://<host>:8080/ui
-                                                # withcache: http://<host>:3000/
+                                                # withcache: http://<host>:8081/
 ```
 
 If you'd rather not set the env var, pass ``--env-file envvars`` on
@@ -443,7 +443,7 @@ Wants=network-online.target
 [Container]
 Image=ghcr.io/safl/withcache:latest
 AutoUpdate=registry
-PublishPort=3000:3000
+PublishPort=8081:8081
 Volume={data_dir_abs}/withcache:/data:Z
 # See note on bty-web's DNS= -- same reason.
 DNS=1.1.1.1
@@ -463,10 +463,10 @@ def _quadlet_nbdmux(
     nbdmux_pw: str = _PLACEHOLDER_PASSWORD,
 ) -> str:
     """Render the nbdmux Quadlet unit. The compose path wires nbdmux
-    to withcache via the compose network (``http://withcache:3000``);
+    to withcache via the compose network (``http://withcache:8081``);
     the Quadlet path has no shared network, so we point at
-    ``host.containers.internal:3000`` which Podman resolves to the
-    host's default gateway - the withcache Quadlet publishes 3000 on
+    ``host.containers.internal:8081`` which Podman resolves to the
+    host's default gateway - the withcache Quadlet publishes 8081 on
     the host so this route works without baking in a LAN address."""
     edit_note = (
         "# Edit Environment=NBDMUX_ADMIN_PASSWORD before installing.\n#\n"
@@ -486,7 +486,7 @@ Wants=network-online.target
 [Container]
 Image=ghcr.io/safl/nbdmux:latest
 AutoUpdate=registry
-PublishPort=4040:4040
+PublishPort=8082:8082
 PublishPort=10809:10809
 Volume={data_dir_abs}/nbdmux:/data:Z
 Volume={data_dir_abs}/nbdmux/images:/images:Z
@@ -494,11 +494,11 @@ Volume={data_dir_abs}/nbdmux/images:/images:Z
 DNS=1.1.1.1
 Environment=NBDMUX_ADMIN_PASSWORD={nbdmux_pw}
 # Route nbdmux -> withcache via the host's default gateway. In the
-# compose path this is ``http://withcache:3000`` (compose network
+# compose path this is ``http://withcache:8081`` (compose network
 # DNS); Quadlet units have no shared network, so we use Podman's
 # host-alias which resolves to the host's default gateway and
-# reaches the withcache Quadlet's PublishPort=3000.
-Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:3000
+# reaches the withcache Quadlet's PublishPort=8081.
+Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:8081
 
 [Service]
 Restart=always
@@ -709,7 +709,7 @@ state_dir = "/var/lib/bty"
 [withcache]
 # bty-web routes catalog reads through withcache when this is set.
 # Blank => bty-web streams from origin URLs directly.
-url = "http://{host_addr}:3000"
+url = "http://{host_addr}:8081"
 
 [nbdmux]
 # The nbdmux sidecar serves catalog images over NBD for the
@@ -718,7 +718,7 @@ url = "http://{host_addr}:3000"
 # operator who runs nbdmux somewhere else overrides via the
 # Settings page or this file. Blank => ramboot unavailable
 # (Settings page surfaces that to the operator).
-url = "http://{host_addr}:4040"
+url = "http://{host_addr}:8082"
 
 [netboot]
 # Where the /ui/netboot diagnostic probes TFTP. The bty-tftp
@@ -784,10 +784,10 @@ BTY_SERVER_SESSION_SECRET={session_secret}
 
 # ==== ADVANCED ====
 
-# Where bty-web finds withcache. Default: http://<HOST_ADDR>:3000
+# Where bty-web finds withcache. Default: http://<HOST_ADDR>:8081
 # (the host's LAN address + the published withcache port). Override
 # only if withcache lives on a different host than bty-web.
-# BTY_WITHCACHE_URL=http://withcache.lan:3000
+# BTY_WITHCACHE_URL=http://withcache.lan:8081
 
 # Where bty-web's Netboot-page diagnostic probes for TFTP. Default:
 # HOST_ADDR (the bty-tftp sidecar binds host networking, so udp/69
@@ -1461,7 +1461,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     # Root mode pulls images via compose (warm the registry cache), then
     # hands off lifecycle to Quadlet + systemd entirely. Critically: NO
     # ``compose up -d`` in root mode -- the Quadlet-managed services bind
-    # the same ports (8080 / 3000 / TFTP 69), so running both at once
+    # the same ports (8080 / 8081 / 8082 / TFTP 69), so running both at once
     # blocks systemctl start with "port already in use". Non-root mode
     # keeps compose as the lifecycle (no Quadlets to hand off to).
     compose_args = ["--profile", "tftp"] if is_root else []
@@ -1503,8 +1503,8 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     _step("deploy complete", detail=mode_label)
     print(
         f"  bty-web UI:  http://{host_addr}:8080/ui   (login: {admin_pw} / {admin_pw})\n"
-        f"  withcache:   http://{host_addr}:3000/     (login: {withcache_pw} / {withcache_pw})\n"
-        f"  nbdmux:      http://{host_addr}:4040/     (login: {nbdmux_pw} / {nbdmux_pw})\n"
+        f"  withcache:   http://{host_addr}:8081/     (login: {withcache_pw} / {withcache_pw})\n"
+        f"  nbdmux:      http://{host_addr}:8082/     (login: {nbdmux_pw} / {nbdmux_pw})\n"
         f"\n"
         f"  Change the default passwords in {envvars_path} before exposing\n"
         f"  the host past a trusted LAN.",

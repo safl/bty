@@ -87,7 +87,7 @@ def test_tftp_probe_host_derives_from_withcache_url(tmp_path: Path) -> None:
         "bty.toml",
         """
         [withcache]
-        url = "http://192.168.1.110:3000"
+        url = "http://192.168.1.110:8081"
         """,
     )
     cfg = load_config([p]).cfg
@@ -104,7 +104,7 @@ def test_tftp_probe_host_explicit_overrides_withcache(tmp_path: Path) -> None:
         "bty.toml",
         """
         [withcache]
-        url = "http://192.168.1.110:3000"
+        url = "http://192.168.1.110:8081"
 
         [netboot]
         tftp_probe_host = "192.168.1.1"

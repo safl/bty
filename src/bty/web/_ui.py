@@ -2113,7 +2113,7 @@ def register_ui_routes(
         """Save (or clear) the ramboot bytes-path overrides.
 
         ``nbdmux_url`` is the HTTP control plane URL of the nbdmux
-        daemon (e.g. ``http://nbdmux:4040``); empty clears the
+        daemon (e.g. ``http://nbdmux:8082``); empty clears the
         override and ramboot becomes unavailable until either the
         override or the matching env / bty.toml value is set.
         ``ramboot_overlay_size`` is the default tmpfs size for the

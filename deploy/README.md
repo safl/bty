@@ -12,7 +12,7 @@ No clone required. With `uv` (or `pipx`) on the host:
 ```sh
 sudo uvx bty-lab deploy /opt/bty
 #   bty-web:   http://<host>:8080/ui     (login: bty-lab / bty-lab)
-#   withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
+#   withcache: http://<host>:8081/       (login: bty-lab / bty-lab)
 ```
 
 `deploy` creates `/opt/bty` if it doesn't exist and chowns it back to

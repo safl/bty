@@ -114,7 +114,7 @@ class WithcacheConfig:
     ``url`` is the base URL of the withcache cache-host. Blank means
     "no withcache configured", and bty-web then streams catalog
     entries from the origin URL directly on each flash. Set to
-    ``http://<lan>:3000`` to route through a local withcache.
+    ``http://<lan>:8081`` to route through a local withcache.
     Env: ``BTY_WITHCACHE_URL``.
     """
 
@@ -126,10 +126,10 @@ class NbdmuxConfig:
     """nbdmux integration section.
 
     ``url`` is the base URL of the nbdmux daemon's HTTP control
-    plane (default port 4040). Blank means "no nbdmux configured",
+    plane (default port 8082). Blank means "no nbdmux configured",
     and ``boot_mode=ramboot`` is unavailable; the matching Settings
     card surfaces that to the operator. Set to
-    ``http://<lan>:4040`` to route ramboot through a local nbdmux.
+    ``http://<lan>:8082`` to route ramboot through a local nbdmux.
     Env: ``BTY_NBDMUX_URL``.
     """
 
@@ -217,7 +217,7 @@ class Config:
     def advertised_host(self) -> str | None:
         """The LAN address booting clients reach this host at.
 
-        Derived from :attr:`WithcacheConfig.url` (``http://<host>:3000``)
+        Derived from :attr:`WithcacheConfig.url` (``http://<host>:8081``)
         -- the one address the operator already configures and that bty
         hands to clients. ``None`` when no withcache URL is set (a pure
         host install with no cache), in which case callers fall back to

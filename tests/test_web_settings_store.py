@@ -222,18 +222,18 @@ def test_nbdmux_url_unset_returns_none(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_nbdmux_url_env_overrides_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://nbdmux-env:4040")
+    monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://nbdmux-env:8082")
     with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-env:4040"
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-env:8082"
 
 
 def test_nbdmux_url_db_override_wins_over_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://nbdmux-env:4040")
+    monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://nbdmux-env:8082")
     with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_NBDMUX_URL, "http://nbdmux-db:4040")
-        assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-db:4040"
+        _settings_store.set_value(conn, _settings_store.KEY_NBDMUX_URL, "http://nbdmux-db:8082")
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-db:8082"
 
 
 def test_ramboot_overlay_size_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

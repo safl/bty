@@ -28,10 +28,10 @@ def _conn(tmp_path: Path) -> sqlite3.Connection:
 
 def test_blob_url_encodes_origin_and_keeps_basename() -> None:
     origin = "https://github.com/safl/bty/releases/download/v1/bty-server.img.gz"
-    url = _withcache.blob_url("http://cache:3000/", origin)
-    assert url.startswith("http://cache:3000/b/")  # trailing slash trimmed
+    url = _withcache.blob_url("http://cache:8081/", origin)
+    assert url.startswith("http://cache:8081/b/")  # trailing slash trimmed
     assert url.endswith("/bty-server.img.gz")  # cosmetic basename preserved
-    token = url[len("http://cache:3000/b/") :].split("/")[0]
+    token = url[len("http://cache:8081/b/") :].split("/")[0]
     decoded = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
     assert decoded == origin  # withcache can recover the exact origin
 
@@ -78,10 +78,10 @@ def test_resolve_withcache_url_precedence(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.delenv(_settings_store.ENV_WITHCACHE_URL, raising=False)
     with _conn(tmp_path) as conn:
         assert _settings_store.resolve_withcache_url(conn) is None  # unset
-        monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://env-cache:3000")
-        assert _settings_store.resolve_withcache_url(conn) == "http://env-cache:3000"
-        _settings_store.set_value(conn, _settings_store.KEY_WITHCACHE_URL, "http://db:3000")
-        assert _settings_store.resolve_withcache_url(conn) == "http://db:3000"  # override wins
+        monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://env-cache:8081")
+        assert _settings_store.resolve_withcache_url(conn) == "http://env-cache:8081"
+        _settings_store.set_value(conn, _settings_store.KEY_WITHCACHE_URL, "http://db:8081")
+        assert _settings_store.resolve_withcache_url(conn) == "http://db:8081"  # override wins
 
 
 def test_resolve_withcache_url_reads_cfg_from_bty_toml(
@@ -96,15 +96,15 @@ def test_resolve_withcache_url_reads_cfg_from_bty_toml(
 
     monkeypatch.delenv(_settings_store.ENV_WITHCACHE_URL, raising=False)
     toml = tmp_path / "bty.toml"
-    toml.write_text('[withcache]\nurl = "http://from-toml:3000"\n', encoding="utf-8")
+    toml.write_text('[withcache]\nurl = "http://from-toml:8081"\n', encoding="utf-8")
     _config.set_active_config(_config.load_config([toml]))
 
     with _conn(tmp_path) as conn:
         # No DB key, no env -> cfg.withcache.url wins.
-        assert _settings_store.resolve_withcache_url(conn) == "http://from-toml:3000"
+        assert _settings_store.resolve_withcache_url(conn) == "http://from-toml:8081"
         # A DB override still beats bty.toml.
-        _settings_store.set_value(conn, _settings_store.KEY_WITHCACHE_URL, "http://db:3000")
-        assert _settings_store.resolve_withcache_url(conn) == "http://db:3000"
+        _settings_store.set_value(conn, _settings_store.KEY_WITHCACHE_URL, "http://db:8081")
+        assert _settings_store.resolve_withcache_url(conn) == "http://db:8081"
 
     # Restore the empty-config default so later tests aren't polluted.
     _config.set_active_config(_config.load_config([]))

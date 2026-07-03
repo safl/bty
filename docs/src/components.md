@@ -175,7 +175,7 @@ The intended operator experience:
 1. On a host with podman, `uvx bty-lab init /opt/bty` writes a compose
    stack into `/opt/bty/` (create + chown the directory first); `cp envvars.example envvars`, set `HOST_ADDR` +
    passwords, then `podman compose up -d` brings up bty-web on `:8080` and
-   withcache on `:3000` (add `--profile tftp` for the TFTP sidecar). See
+   withcache on `:8081` (add `--profile tftp` for the TFTP sidecar). See
    [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).
 2. The operator UI is gated by `$BTY_ADMIN_PASSWORD` (unset = open, with a
    startup warning); set it in the compose env and open `/ui/login` in a

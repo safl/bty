@@ -2272,7 +2272,7 @@ def test_ui_settings_ramboot_persists_and_clears(client: TestClient) -> None:
     r = client.post(
         "/ui/settings/ramboot",
         data={
-            "nbdmux_url": "http://nbdmux.invalid:4040",
+            "nbdmux_url": "http://nbdmux.invalid:8082",
             "ramboot_overlay_size": "16G",
         },
         follow_redirects=False,
@@ -2280,7 +2280,7 @@ def test_ui_settings_ramboot_persists_and_clears(client: TestClient) -> None:
     assert r.status_code == 303, r.text
     assert r.headers["location"] == "/ui/settings?saved=ramboot#ramboot"
     body = client.get("/ui/settings").text
-    assert "http://nbdmux.invalid:4040" in body
+    assert "http://nbdmux.invalid:8082" in body
     assert "16G" in body
     # Clearing both reverts the effective view.
     client.post(
@@ -2288,7 +2288,7 @@ def test_ui_settings_ramboot_persists_and_clears(client: TestClient) -> None:
         data={"nbdmux_url": "", "ramboot_overlay_size": ""},
     )
     body2 = client.get("/ui/settings").text
-    assert "http://nbdmux.invalid:4040" not in body2
+    assert "http://nbdmux.invalid:8082" not in body2
 
 
 def test_settings_upstream_override_drives_catalog_fetch_url(
@@ -3064,7 +3064,7 @@ def test_catalog_entry_check_origin_reachable_and_cached(
             virtual_size_bytes=None,
         ),
     )
-    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:8081")
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)
 
     r = client.post(
@@ -3128,7 +3128,7 @@ def test_catalog_entry_check_oras_heads_withcache_even_without_catalog_row(
             virtual_size_bytes=None,
         ),
     )
-    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:8081")
 
     captured: dict[str, object] = {}
 
@@ -3177,7 +3177,7 @@ def test_catalog_entry_check_oras_heads_withcache_with_src(
             title="img.zst",
         ),
     )
-    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:3000")
+    monkeypatch.setattr(_settings_store, "resolve_withcache_url", lambda _c: "http://cache:8081")
     monkeypatch.setattr(
         _flash,
         "probe_image_url",

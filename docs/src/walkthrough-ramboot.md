@@ -22,7 +22,7 @@ You already have a working bty-web deploy with at least one catalog
 entry bound to a machine. The `bty-lab deploy` defaults bring up the
 extra moving parts automatically (since v0.62):
 
-- The `nbdmux` sidecar in `compose.yml` listens on port 4040 (HTTP
+- The `nbdmux` sidecar in `compose.yml` listens on port 8082 (HTTP
   control plane) and 10809 (NBD listener).
 - bty-web and nbdmux share `${BTY_HOST_DATA_DIR}/nbdmux/images/`. bty-web
   decompresses catalog images there; nbdmux serves the same bytes over
@@ -42,7 +42,7 @@ regenerate `compose.yml` with the new sidecar, then
 
 ## Configure the bytes path
 
-`bty-lab init` writes `[nbdmux] url = "http://<host>:4040"` into the
+`bty-lab init` writes `[nbdmux] url = "http://<host>:8082"` into the
 generated `bty.toml` for you (since v0.64.1; same pattern as
 withcache), so the bytes path is already configured when the stack
 comes up. The **Settings -> Ramboot** card is an override surface:
@@ -53,7 +53,7 @@ change the default overlay size.
 The card carries two fields:
 
 - **nbdmux URL**: leave blank to inherit the deploy default; set to
-  `http://<host>:4040` (or wherever your nbdmux lives) to override.
+  `http://<host>:8082` (or wherever your nbdmux lives) to override.
   Saving an empty value AND clearing the `[nbdmux] url` line in
   `bty.toml` disables the boot mode globally; the iPXE chain then
   falls back to bty-tui with a reason on the events feed.
@@ -74,11 +74,11 @@ the export) lives in **nbdmux**, not bty-web. Operators populate
 nbdmux directly; bty-web only validates that a ref is ready before
 letting the operator bind a machine to it.
 
-Open the nbdmux dashboard at `http://<host>:4040/` and POST a warm
+Open the nbdmux dashboard at `http://<host>:8082/` and POST a warm
 request. The simplest path is from a shell on the host:
 
 ```bash
-curl -X POST http://<host>:4040/exports \
+curl -X POST http://<host>:8082/exports \
   -H "Content-Type: application/json" \
   -d '{
     "name": "<bty_image_ref>",
@@ -92,7 +92,7 @@ catalog table or `/images`). `<catalog-entry-src>` is the upstream
 URL (`oras://...` or `https://.../...img.gz`); copy it from the same
 row. nbdmux routes the fetch through the configured
 `NBDMUX_WITHCACHE_URL` (set by `bty-lab init` to the in-stack
-`http://withcache:3000`), so the bytes flow through the same LAN
+`http://withcache:8081`), so the bytes flow through the same LAN
 cache as the flash path.
 
 The nbdmux dashboard shows the state machine progressing

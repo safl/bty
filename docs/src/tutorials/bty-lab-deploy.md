@@ -67,7 +67,7 @@ End-of-deploy output points at the two URLs:
 
 ```text
 bty:       http://<host>:8080/ui     (login: bty-lab / bty-lab)
-withcache: http://<host>:3000/       (login: bty-lab / bty-lab)
+withcache: http://<host>:8081/       (login: bty-lab / bty-lab)
 ```
 
 Change the passwords in `/opt/bty/envvars` before exposing past
