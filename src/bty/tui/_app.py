@@ -648,12 +648,12 @@ class BtyTui:
                     "assignment in the bty-server UI (/ui/machines)."
                 )
             if plan_action == "exit":
-                # The server says nothing to do here (boot_mode=sanboot
+                # The server says nothing to do here (boot_mode=ipxe-exit
                 # or an unrecognised policy). Print a Panel so an operator
                 # hand-running ``bty --mac X`` from a workstation sees WHY
                 # the tool is exiting -- a silent ``sys.exit(0)`` looks
                 # like a crash. The live env never reaches this path:
-                # sanboot short-circuits at the iPXE chain (boots the
+                # ipxe-exit short-circuits at the iPXE chain (boots the
                 # local disk directly, no live-env chain).
                 self._console.print(
                     Panel(
@@ -661,7 +661,7 @@ class BtyTui:
                         f"[{_PRIMARY}]{self._state.mac}[/] -- nothing for "
                         "bty to do here.\n\n"
                         f"[{_MUTED}]The firmware / local disk boots directly "
-                        "(sanboot or already provisioned); no flash, no wizard.[/]",
+                        "(ipxe-exit or already provisioned); no flash, no wizard.[/]",
                         title="Plan: nothing to do",
                         border_style=_PRIMARY,
                     )
