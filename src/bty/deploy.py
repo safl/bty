@@ -1,8 +1,8 @@
 """``bty-lab init`` -- emit a ready-to-run podman/docker compose
-deployment of bty-web + withcache (with an optional Quadlet variant for
-systemd auto-start).
+deployment of bty-web + withcache + nbdmux (with an optional Quadlet
+variant for systemd auto-start).
 
-The intent is to turn the first-boot ergonomics of a bty + withcache
+The intent is to turn the first-boot ergonomics of a bty + sidecars
 host from "clone the repo, find the right files" into:
 
     uvx bty-lab init ./bty-host
@@ -12,9 +12,9 @@ host from "clone the repo, find the right files" into:
 
 The emitted ``compose.yml`` pins ``bty-web`` and ``bty-tftp`` to the
 *exact* version of the CLI that produced it -- re-running the command
-later regenerates the file against a newer release. ``withcache`` is an
-external project and stays at ``:latest`` (it does not share bty's
-release cadence).
+later regenerates the file against a newer release. ``withcache`` and
+``nbdmux`` are ecosystem sidecars: they stay at ``:latest`` and are
+released on their own cadence (they do not share bty's version).
 
 ``bty-lab`` is a separate console script from ``bty`` on purpose: the
 flash wizard wants to stay single-purpose, and matching the script name
@@ -100,6 +100,7 @@ def _compose_yaml(version: str) -> str:
 #   export COMPOSE_ENV_FILES=envvars                           # once per shell, then:
 #   podman compose up -d                                       # bty:       http://<host>:8080/ui
 #                                                              # withcache: http://<host>:8081/
+#                                                              # nbdmux:    http://<host>:8082/
 #
 # (Without the export, pass --env-file envvars on every compose call.)
 #
@@ -318,6 +319,7 @@ export COMPOSE_ENV_FILES=envvars
 
 podman compose up -d                            # bty:       http://<host>:8080/ui
                                                 # withcache: http://<host>:8081/
+                                                # nbdmux:    http://<host>:8082/
 ```
 
 If you'd rather not set the env var, pass ``--env-file envvars`` on
@@ -330,15 +332,18 @@ not):
 podman compose up -d --profile tftp
 ```
 
-bty-web auto-discovers withcache from the `BTY_WITHCACHE_URL` env var
-that the compose file sets, so first-boot needs no UI configuration --
-just `HOST_ADDR` + a password in `envvars`.
+bty-web auto-discovers withcache and nbdmux through the ``[withcache]``
+and ``[nbdmux]`` blocks of the bind-mounted ``bty.toml`` (populated by
+``bty-lab deploy``); ``$BTY_CONFIG_FILE`` on the container points at
+``/etc/bty/bty.toml``. So first-boot needs no UI configuration -- just
+``HOST_ADDR`` + a password in ``envvars``.
 
 ## Where the state lives
 
 - `data/bty/`       -- bty-web's `/var/lib/bty` (state.db, catalogs,
   netboot artifacts, backups). Bind-mounted into the container.
 - `data/withcache/` -- withcache's `/data` (cached image blobs).
+- `data/nbdmux/`    -- nbdmux's `/data` (warmed .img files + state).
 
 Override the parent path with `BTY_HOST_DATA_DIR=<absolute-path>` in
 `envvars` to put state on a different disk.
@@ -1111,9 +1116,10 @@ def init_main(argv: list[str] | None = None, *, prog: str = "bty-lab init") -> N
         prog=prog,
         description=(
             "Generate a ready-to-run podman/docker compose deployment "
-            "for bty-web + withcache (plus optional Quadlet units). "
-            "The emitted compose.yml pins the bty-web / bty-tftp images "
-            "to the same version as the bty CLI that generated it. "
+            "for bty-web + withcache + nbdmux (plus optional Quadlet "
+            "units). The emitted compose.yml pins the bty-web / "
+            "bty-tftp images to the same version as the bty CLI that "
+            "generated it; withcache and nbdmux stay on :latest. "
             "Re-runnable: pass --force to refresh an existing deploy "
             "directory against a newer bty release."
         ),
