@@ -211,7 +211,7 @@
                 boot mode reads the subset it needs; fields it ignores are
                 dimmed and marked <em>not used</em>. Values persist across
                 policy changes (e.g. a sanboot drive you calibrated under
-                <code>sanboot</code> still applies once you switch to a flash
+                <code>ipxe-exit</code> still applies once you switch to a flash
                 policy).
             </p>
 
@@ -279,7 +279,7 @@
                 </div>
                 {% endif %}
             </div>
-            <div class="mb-3" data-policy-relevant="sanboot bty-flash-always bty-flash-once bty-inventory">
+            <div class="mb-3" data-policy-relevant="ipxe-exit bty-flash-always bty-flash-once bty-inventory">
                 <label class="form-label" for="sanboot_drive">Sanboot drive
                     <span class="policy-usage small text-muted fw-normal ms-1"></span></label>
                 <input type="text" name="sanboot_drive" id="sanboot_drive"
@@ -293,10 +293,10 @@
                     the second, and so on. Leave blank for the default
                     (<code>0x80</code>). iPXE selects by BIOS drive number, not by
                     the Linux serial used for flashing. Read by the
-                    <code>sanboot</code> policy, the one-shot disk boot after each
+                    <code>ipxe-exit</code> policy, the one-shot disk boot after each
                     <code>bty-flash-always</code> reflash, and a
-                    <code>bty-flash-once</code> machine that settles to
-                    <code>sanboot</code>.
+                    <code>bty-flash-once</code> machine after its flash completes
+                    and the plan flips to the <code>ipxe-exit</code> chain.
                 </div>
             </div>
             <div class="mb-3">
@@ -327,7 +327,7 @@
     // carries a ``data-policy-relevant`` attribute listing the
     // policies that consume it (space-separated). All fields stay in
     // the DOM and still POST -- dimming never clears a value, so a
-    // sanboot drive calibrated under ``sanboot`` survives a switch to
+    // sanboot drive calibrated under ``ipxe-exit`` survives a switch to
     // a flash policy.
     const policySelect = document.getElementById("boot_mode");
     if (!policySelect) return;
