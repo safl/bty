@@ -986,7 +986,7 @@ def create_app(
             template = jinja.get_template("ipxe_unknown.j2")
             rendered = template.render(mac=normalised, machine=machine)
             offer_kind = "unknown"
-            offer_summary = f"{normalised} offered sanboot/exit -- no bty_image_ref bound"
+            offer_summary = f"{normalised} offered ipxe-exit -- no bty_image_ref bound"
             offer_details = {"offer": "unknown"}
 
         # Apply collected side-effects + audit every PXE hit in one
@@ -1676,8 +1676,9 @@ def create_app(
         actually booted the live env, which is stronger evidence than
         the ``/pxe`` config GET (that only means "we told it to boot").
         One-shot state transition for the bit-consuming policies: the
-        next ``GET /pxe/{mac}`` reads the bit and serves a sanboot of
-        the local disk instead of re-running the live-env boot.
+        next ``GET /pxe/{mac}`` reads the bit and serves the
+        ``ipxe-exit`` chain (boots the local disk) instead of
+        re-running the live-env boot.
         ``bty-flash-always`` uses it to boot the just-flashed disk
         once before alternating back to flash; ``bty-flash-once`` keeps
         it set as the terminal state (re-armed only when the operator
@@ -1685,7 +1686,7 @@ def create_app(
         disk after re-collecting inventory. The WHERE clause confines
         arming to those three policies so the bit's lifecycle can't
         leak into others (a typo'd or stale ``?mac=`` is a no-op on
-        sanboot / bty-tui).
+        ``ipxe-exit`` / ``bty-tui``).
 
         last_seen_at + last_seen_ip get touched too: a /boot fetch
         is a live-env heartbeat, and an operator looking at
