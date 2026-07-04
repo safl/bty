@@ -154,17 +154,18 @@ introduced in v0.25.0).
   the firmware boots the local disk. Stable / production stance;
   the explicit-PUT default for assigned machines.
 - `bty-flash-always` -- per-PXE-contact alternation: flash chain
-  on contact N, one-shot sanboot of the just-flashed disk on
-  contact N+1 (driven by the `saw_flasher_boot` bit, armed on
+  on contact N, one-shot ipxe-exit chain of the just-flashed disk
+  on contact N+1 (driven by the `saw_flasher_boot` bit, armed on
   `/boot?mac=` artifact fetch). Plan returns `mode=flash` (if a
   ref + serial are bound). Per-job CI cadence: the box reflashes
-  itself every netboot, books its disk once between reflashes
+  itself every netboot, boots its disk once between reflashes
   under PXE-first firmware so it doesn't loop.
 - `bty-flash-once` -- same flash chain as `bty-flash-always`, but
   the `saw_flasher_boot` bit stays armed after the first flash
-  completes (terminal). Every subsequent PXE contact serves
-  sanboot. For "I want this machine reimaged now, then leave it
-  alone". Re-armed only when the operator re-saves the machine.
+  completes (terminal). Every subsequent PXE contact serves the
+  ipxe-exit chain. For "I want this machine reimaged now, then
+  leave it alone". Re-armed only when the operator re-saves the
+  machine.
 - `bty-tui` -- every PXE boot returns the live-env chain; the plan
   endpoint returns `mode=interactive` so the operator picks at
   the tty1 wizard. **Auto-discovery default for unknown MACs**:
@@ -172,9 +173,9 @@ introduced in v0.25.0).
   prior server-side configuration.
 - `bty-inventory` -- alternates a live-env inventory boot (bty
   collects disks + lshw, posts to `/pxe/{mac}/inventory`, reboots)
-  with a sanboot of the disk on the next contact. Auto-discovery
-  default for fleet machines; same `saw_flasher_boot` bit drives
-  the alternation as `bty-flash-always`.
+  with the ipxe-exit chain (disk boot) on the next contact.
+  Auto-discovery default for fleet machines; same `saw_flasher_boot`
+  bit drives the alternation as `bty-flash-always`.
 
 **Server-vs-client truth asymmetry.** `mode=flash` is the only
 plan that makes the server the source of truth for what gets
