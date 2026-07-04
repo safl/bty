@@ -2143,80 +2143,47 @@ def create_app(
     def list_images_endpoint(request: Request) -> list[_models.ImageEntry]:
         """Unified catalog listing.
 
-        Each entry carries a single ``url``: server URL for
-        cached / imported / dir-scan-with-sidecar images,
-        upstream URL for manifest entries that have not been
-        cached yet. The client just flashes from ``url`` --
-        no need to know about manifests, sidecars, or cache.
+        Each entry carries a single ``url`` -- the upstream location
+        the client streams the image bytes from. Since v0.60.0 bty-web
+        does not host image bytes: the withcache sidecar (or the raw
+        origin) fulfils the fetch. The ``cached`` field on the entry
+        is always False and remains only to preserve the existing
+        response schema; a future minor may drop it.
 
         Open route: the PXE-booted ``bty`` flow needs to enumerate
-        the catalog without first bootstrapping auth. The
-        byte-serving route ``GET /images/{name}`` is already
-        open. Same homelab-network trust model as /pxe / /boot.
+        the catalog without first bootstrapping auth. Same
+        homelab-network trust model as /pxe / /boot.
         """
+        del request  # v0.60.0: URLs are always upstream; the request origin no longer matters here
         unified = _list_unified_images()
-        origin = _request_origin(request)
         out: list[_models.ImageEntry] = []
         for u in unified:
-            if u.cached:
-                # Local file or cached manifest blob -- bty-web
-                # serves the bytes. URL shape is
-                # ``/images/<sha>/<name>``: the SHA binds the
-                # content; the trailing name is decorative so a
-                # client that derives format from URL filename
-                # extension (``bty.flash.probe_image_url``) gets
-                # ``foo.img.zst`` instead of a bare 64-hex digest.
-                # The server route ignores ``<name>`` for the
-                # lookup.
-                if u.sha256 is None:
-                    continue  # cached + no sha is impossible; defensive
-                # URL-encode the trailing name. Catalog ``name`` is
-                # human text -- ``nosi fedora-sysdev (x86_64, rolling)``
-                # is real -- and Python's ``http.client._validate_path``
-                # rejects any URL path that contains a space or
-                # control character (CVE-2019-9740 mitigation), so
-                # an unencoded space here makes a downstream
-                # ``urllib.request.urlopen`` from ``bty`` raise
-                # ``InvalidURL`` before the request ever leaves
-                # the box. ``safe=""`` percent-encodes
-                # every special character (parens, spaces, etc.)
-                # so the URL is reliably valid; the server route
-                # is ``GET /images/{key}/{name:path}`` and only
-                # reads ``key`` for resolution, so the encoded
-                # form is purely decorative on the wire.
-                encoded_name = urllib.parse.quote(u.names[0], safe="")
-                url = f"{origin}/images/{u.sha256}/{encoded_name}"
-            else:
-                # Not cached: the client streams directly from
-                # upstream. Try manifest source first, then ``url``
-                # source (operator-curated catalog_entries row).
-                # Skip dir-scan-only entries with no sha + no
-                # upstream URL -- the auto-import on startup will
-                # hash them and they'll re-surface as cached in the
-                # next listing.
-                upstream = next(
-                    (s.location for s in u.sources if s.kind in ("manifest", "url")),
-                    None,
-                )
-                if upstream is None:
-                    continue
-                url = upstream
+            # Every catalog row carries an upstream URL (manifest
+            # or operator-curated). Skip anything that doesn't -- a
+            # dir-scan-only entry with no source can't be flashed
+            # over the wire.
+            upstream = next(
+                (s.location for s in u.sources if s.kind in ("manifest", "url")),
+                None,
+            )
+            if upstream is None:
+                continue
             out.append(
                 _models.ImageEntry(
                     name=u.names[0],
                     format=u.format or "",
                     size_bytes=u.size_bytes or 0,
-                    url=url,
+                    url=upstream,
                     ref=u.ref,
                     sha_short=u.sha256[:12] if u.sha256 else None,
-                    cached=u.cached,
+                    cached=False,
                     arch=u.arch,
                 )
             )
         return out
 
     @app.get("/catalog.toml", response_class=PlainTextResponse)
-    def list_catalog_toml(request: Request) -> Response:
+    def list_catalog_toml() -> Response:
         """Serve the unified image catalog as a TOML manifest matching
         the ``bty.catalog.Catalog`` schema (``version=1``, ``[[images]]``
         entries with ``name``/``src``/``sha256``/``format``/``size_bytes``).
@@ -2253,7 +2220,6 @@ def create_app(
         files will surface them.
         """
         unified = _list_unified_images()
-        origin = _request_origin(request)
         with _db.open_db(state_path) as conn:
             withcache_url = _settings_store.resolve_withcache_url(conn)
         lines: list[str] = ["version = 1", ""]
@@ -2262,29 +2228,21 @@ def create_app(
                 # Catalog manifest schema requires a sha; skip dir-scan
                 # entries that haven't been hashed yet.
                 continue
-            if u.cached:
-                # See the matching site in ``list_images_endpoint`` for
-                # the rationale on percent-encoding the name segment.
-                # Catalog ``name`` is human text and may contain
-                # spaces / parens that would otherwise produce a URL
-                # ``http.client`` rejects with InvalidURL.
-                encoded_name = urllib.parse.quote(u.names[0], safe="")
-                src = f"{origin}/images/{u.sha256}/{encoded_name}"
-            else:
-                upstream = next(
-                    (s.location for s in u.sources if s.kind in ("manifest", "url")),
-                    None,
-                )
-                if upstream is None:
-                    continue
-                src = upstream
-                # Withcache canonicalisation: the live env sees the
-                # same HTTPS URL shape (``<withcache>/b/<b64>/<name>``)
-                # regardless of whether the original upstream is oras
-                # or https. Withcache 0.6.0+ handles the OCI dance
-                # internally on a cold miss.
-                if withcache_url:
-                    src = _withcache.blob_url(withcache_url, upstream)
+            upstream = next(
+                (s.location for s in u.sources if s.kind in ("manifest", "url")),
+                None,
+            )
+            if upstream is None:
+                continue
+            # Withcache canonicalisation: the live env sees the
+            # same HTTPS URL shape (``<withcache>/b/<b64>/<name>``)
+            # regardless of whether the original upstream is oras
+            # or https. Withcache 0.6.0+ handles the OCI dance
+            # internally on a cold miss. Since v0.60.0 bty-web no
+            # longer hosts image bytes itself; when no withcache is
+            # configured we ship the raw upstream URL and let the
+            # live env fetch it directly.
+            src = _withcache.blob_url(withcache_url, upstream) if withcache_url else upstream
             # Defense-in-depth: a catalog manifest never publishes
             # ``file://`` srcs (see the contract in the docstring).
             # The cached/upstream branches above shouldn't emit one,
@@ -2740,8 +2698,8 @@ def create_app(
         **Metadata-only**. Bytes are NOT fetched at import time. From
         v0.40 the catalog-Download manager + the per-entry Fetch
         button are gone; bytes materialise on demand at flash time
-        via the withcache warm-fetch path (oras + https) or bty-web's
-        own ``/images/{ref}`` proxy on a cold cache.
+        via the withcache warm-fetch path (oras + https), or the raw
+        upstream origin when no withcache is configured.
 
         Per-entry behaviour:
 
@@ -3236,12 +3194,6 @@ def _request_host(request: Request) -> str:
     hostname = request.url.hostname or "127.0.0.1"
     port = request.url.port or 8080
     return f"{hostname}:{port}"
-
-
-def _request_origin(request: Request) -> str:
-    """Return the ``scheme://host:port`` origin the client used."""
-    scheme = request.url.scheme or "http"
-    return f"{scheme}://{_request_host(request)}"
 
 
 def _seed_boot_dir(boot_root: Path) -> None:
