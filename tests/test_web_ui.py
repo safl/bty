@@ -1268,6 +1268,287 @@ def test_ui_catalog_entry_form_oras_duplicate_redirects_with_error(
     assert "already+exists" in r2.headers["location"]
 
 
+# ---------- ramboot pre-warm (per-image action buttons) --------------------
+
+
+def _seed_https_entry(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> str:
+    """Insert one https catalog entry via the form and return its
+    ``bty_image_ref``. Used by the pre-warm / warm-state tests below
+    so each test carries its own known ref.
+    """
+    from bty.web import _app as _web_app
+
+    monkeypatch.setattr(_web_app, "_head_content_length", lambda _u: None)
+    _login(client)
+    r = client.post(
+        "/ui/catalog/entries",
+        data={"image_url": url, "sha_url": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    entries = client.get("/catalog/entries", cookies=AUTH).json()
+    row = next(e for e in entries if e["src"] == url)
+    return row["bty_image_ref"]
+
+
+def test_ui_image_prewarm_calls_nbdmux_warm_export(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /ui/images/{ref}/prewarm`` resolves the ref -> src via
+    ``catalog_entries``, then calls :func:`nbdmux.client.warm_export`
+    with (name=ref, src_url=<catalog src>, server=<nbdmux url>). The
+    handler 303s back to /ui/images and lands a
+    ``ramboot.prewarm.requested`` event so operator actions are
+    debuggable from /ui/events."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    src = "https://example.invalid/warm.img.gz"
+    ref = _seed_https_entry(client, monkeypatch, src)
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_warm(
+        name: str,
+        src_url: str,
+        *,
+        format_hint: str | None = None,
+        readonly: bool = True,
+        server: str = "",
+        timeout: float = 5.0,
+    ) -> dict[str, str]:
+        calls.append(
+            {"name": name, "src_url": src_url, "format_hint": format_hint, "server": server}
+        )
+        return {"name": name, "status": "queued"}
+
+    monkeypatch.setattr(nbdmux_client, "warm_export", _fake_warm)
+
+    r = client.post(f"/ui/images/{ref}/prewarm", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/images"
+    assert len(calls) == 1
+    assert calls[0]["name"] == ref
+    assert calls[0]["src_url"] == src
+    assert calls[0]["server"] == "http://nbdmux.invalid:8082"
+
+    events = client.get(
+        "/events",
+        params={"subject_kind": "catalog", "kind": "ramboot.prewarm.requested"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["subject_id"] == src
+
+
+def test_ui_image_prewarm_without_nbdmux_url_flashes_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blank nbdmux URL -> 303 with ``?error=nbdmux not configured...``
+    query param and warm_export is NOT called (guards against the
+    handler falling through to the client with server=None)."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.delenv("BTY_NBDMUX_URL", raising=False)
+    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/noconfig.img.gz")
+
+    called = False
+
+    def _fake_warm(*_a: object, **_kw: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(nbdmux_client, "warm_export", _fake_warm)
+    r = client.post(f"/ui/images/{ref}/prewarm", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/ui/images?error=")
+    assert "not+configured" in r.headers["location"] or "not%20configured" in r.headers["location"]
+    assert called is False
+
+
+def test_ui_image_prewarm_unknown_ref_flashes_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST for a ref that isn't in ``catalog_entries`` -> 303 with
+    ``?error=unknown ref:<...>``. Guards against a stale button
+    click after an entry was deleted from another tab."""
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    _login(client)
+    r = client.post("/ui/images/deadbeef/prewarm", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert loc.startswith("/ui/images?error=")
+    assert "unknown+ref" in loc or "unknown%20ref" in loc
+
+
+def test_ui_image_prewarm_nbdmux_error_logs_failure_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """warm_export raises :class:`NbdmuxError` -> 303 back with
+    ``?error=prewarm failed:<...>`` and a
+    ``ramboot.prewarm.failed`` event lands in the log carrying the
+    src as subject_id. Never 500s -- an unreachable daemon is an
+    operational event, not a bug."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    src = "https://example.invalid/boom.img.gz"
+    ref = _seed_https_entry(client, monkeypatch, src)
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise nbdmux_client.NbdmuxError("simulated 502")
+
+    monkeypatch.setattr(nbdmux_client, "warm_export", _boom)
+
+    r = client.post(f"/ui/images/{ref}/prewarm", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "prewarm+failed" in loc or "prewarm%20failed" in loc
+
+    events = client.get(
+        "/events",
+        params={"subject_kind": "catalog", "kind": "ramboot.prewarm.failed"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+    assert events[0]["subject_id"] == src
+
+
+def test_ui_image_unwarm_calls_nbdmux_remove_export(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /ui/images/{ref}/unwarm`` calls
+    :func:`nbdmux.client.remove_export` with the ref as name; the
+    client's 404-is-no-op wrapper makes the endpoint idempotent for
+    the operator's "make sure this is gone" intent. Logs
+    ``ramboot.prewarm.removed``."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/unwarm.img.gz")
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_remove(name: str, server: str = "", timeout: float = 5.0) -> None:
+        calls.append({"name": name, "server": server})
+
+    monkeypatch.setattr(nbdmux_client, "remove_export", _fake_remove)
+
+    r = client.post(f"/ui/images/{ref}/unwarm", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/ui/images"
+    assert len(calls) == 1
+    assert calls[0]["name"] == ref
+
+    events = client.get(
+        "/events",
+        params={"subject_kind": "catalog", "kind": "ramboot.prewarm.removed"},
+        cookies=AUTH,
+    ).json()["events"]
+    assert len(events) == 1
+
+
+def test_ui_image_unwarm_without_nbdmux_configured_flashes_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Symmetric with the prewarm-without-config test: no nbdmux URL
+    -> 303 with ``?error=...`` and remove_export is not called."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.delenv("BTY_NBDMUX_URL", raising=False)
+    called = False
+
+    def _fake(*_a: object, **_kw: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(nbdmux_client, "remove_export", _fake)
+    _login(client)
+    r = client.post("/ui/images/anyref/unwarm", cookies=AUTH, follow_redirects=False)
+    assert r.status_code == 303
+    assert "/ui/images?error=" in r.headers["location"]
+    assert called is False
+
+
+def test_ui_images_warm_column_shows_ready_when_nbdmux_ready(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """/ui/images renders a Warm column with a ready badge and an
+    Unwarm form when nbdmux's ``list_exports`` reports the ref at
+    ``status='ready'``. Pins the render-time-poll behaviour: the
+    column reflects nbdmux state on each page load, no htmx poll
+    needed."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/ready.img.gz")
+    monkeypatch.setattr(
+        nbdmux_client,
+        "list_exports",
+        lambda server, timeout=2.0: [{"name": ref, "status": "ready"}],
+    )
+    body = client.get("/ui/images", cookies=AUTH).text
+    assert ">Warm<" in body  # header column present
+    assert ">ready<" in body  # badge for this ref
+    assert f'action="/ui/images/{ref}/unwarm"' in body
+
+
+def test_ui_images_warm_column_shows_not_warmed_when_export_absent(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nbdmux configured but the ref has no export yet -> Warm cell
+    reads "not warmed" and the row surfaces a Pre-warm form."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/cold.img.gz")
+    monkeypatch.setattr(nbdmux_client, "list_exports", lambda server, timeout=2.0: [])
+    body = client.get("/ui/images", cookies=AUTH).text
+    assert ">not warmed<" in body
+    assert f'action="/ui/images/{ref}/prewarm"' in body
+
+
+def test_ui_images_warm_column_absent_when_nbdmux_unconfigured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blank nbdmux URL -> no Pre-warm / Unwarm forms in the pane.
+    Guards against surfacing an action a fresh (unconfigured)
+    deploy cannot perform."""
+    monkeypatch.delenv("BTY_NBDMUX_URL", raising=False)
+    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/idle.img.gz")
+    body = client.get("/ui/images", cookies=AUTH).text
+    assert f'action="/ui/images/{ref}/prewarm"' not in body
+    assert f'action="/ui/images/{ref}/unwarm"' not in body
+
+
+def test_ui_images_warm_column_falls_back_when_nbdmux_unreachable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """nbdmux configured but ``list_exports`` raises (daemon down,
+    network blip) -> the page still renders 200, the Warm column
+    reads "not warmed" as if the export were absent, and the
+    Pre-warm form still appears so the operator has a way forward
+    once nbdmux is back."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/down.img.gz")
+
+    def _boom(*_a: object, **_kw: object) -> list[dict[str, str]]:
+        raise nbdmux_client.NbdmuxError("connection refused")
+
+    monkeypatch.setattr(nbdmux_client, "list_exports", _boom)
+
+    r = client.get("/ui/images", cookies=AUTH)
+    assert r.status_code == 200
+    assert ">not warmed<" in r.text
+    assert f'action="/ui/images/{ref}/prewarm"' in r.text
+
+
 def test_ui_machine_save_is_audited(client: TestClient) -> None:
     """Changing a machine via the browser UI records machine.created /
     machine.upserted, same as the JSON PUT path -- so operator config

@@ -58,7 +58,10 @@
     serves them when cold. The header carries three add-paths:
     <em>Add image</em> (a single URL), <em>Upload catalog</em>
     (a catalog.toml), and <em>Fetch latest catalog</em> (pull the
-    bty release catalog).
+    bty release catalog). The <em>Warm</em> column and per-row
+    <em>Pre-warm</em> action drive nbdmux's ramboot warm pipeline;
+    a machine bound to a ref in ramboot mode boots as soon as its
+    row shows <em>ready</em>.
 {% endcall %}
 {% endblock %}
 
@@ -97,6 +100,7 @@
                     {{ sort_header('Format', 'format', sort, preserved) }}
                     {{ sort_header('Arch', 'arch', sort, preserved) }}
                     {{ sort_header('Source', 'ref', sort, preserved) }}
+                    <th title="ramboot warm state from nbdmux (queued, fetching, decompressing, ready, failed). Blank when nbdmux isn't configured or the ref has never been warmed.">Warm</th>
                     <th>Status</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Action</th>
                 </tr>
@@ -135,10 +139,54 @@
                         {{ copy_chip(entry_src, shown=entry_src) }}
                         {% endif %}
                     </td>
+                    {# Warm column: ramboot state for this ref from nbdmux's
+                       /exports (populated at render time). Blank / hidden
+                       when nbdmux isn't configured. #}
+                    {% set _ws = (warm_status_by_ref or {}).get(u.ref) %}
+                    <td class="small">
+                        {% if not nbdmux_configured %}
+                        <span class="text-muted" title="Configure nbdmux in Settings > Ramboot to warm images for ramboot serving.">&mdash;</span>
+                        {% elif _ws == 'ready' %}
+                        <span class="badge bg-success" title="nbdmux export ready; ramboot can serve this ref immediately."><i class="bi bi-broadcast me-1"></i>ready</span>
+                        {% elif _ws == 'failed' %}
+                        <span class="badge bg-danger" title="nbdmux warm errored; see Events for the reason.">failed</span>
+                        {% elif _ws %}
+                        <span class="badge bg-info text-dark" title="nbdmux is warming this export.">{{ _ws }}</span>
+                        {% else %}
+                        <span class="text-muted" title="nbdmux has no export for this ref yet.">not warmed</span>
+                        {% endif %}
+                    </td>
                     <td class="small bty-check-result text-muted">
                         <span class="text-muted">&mdash;</span>
                     </td>
                     <td class="text-end text-nowrap">
+                        {# Pre-warm / Unwarm: form-post so a click kicks off
+                           nbdmux warming for this ref (or removes an
+                           existing export) and reloads with the new state
+                           picked up by the render-time /exports poll.
+                           Hidden when nbdmux isn't configured or no src
+                           to warm from. #}
+                        {% if nbdmux_configured and entry_src %}
+                        {% if _ws in ('queued', 'fetching', 'decompressing', 'ready') %}
+                        <form method="post" action="/ui/images/{{ u.ref }}/unwarm" class="d-inline m-0">
+                            <button type="submit"
+                                    class="btn btn-sm btn-outline-warning me-1"
+                                    title="Remove this ref's nbdmux export."
+                                    aria-label="Remove nbdmux export for this ref">
+                                <i class="bi bi-broadcast-pin"></i>{% if _ws == 'ready' %} Unwarm{% else %} Cancel{% endif %}
+                            </button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="/ui/images/{{ u.ref }}/prewarm" class="d-inline m-0">
+                            <button type="submit"
+                                    class="btn btn-sm btn-outline-primary me-1"
+                                    title="Enqueue an nbdmux warm for this ref (fetch + decompress via withcache)."
+                                    aria-label="Pre-warm this ref via nbdmux">
+                                <i class="bi bi-broadcast"></i> Pre-warm
+                            </button>
+                        </form>
+                        {% endif %}
+                        {% endif %}
                         {% if entry_src %}
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary bty-catalog-entry-check-btn me-1"
@@ -159,7 +207,7 @@
                 </tr>
                 {% endfor %}
                 {% if not unified %}
-                <tr><td colspan="7" class="text-muted text-center py-3">
+                <tr><td colspan="8" class="text-muted text-center py-3">
                     No catalog entries yet. Use <strong>Add image</strong>,
                     <strong>Upload catalog</strong>, or
                     <strong>Fetch latest catalog</strong> in the header above.

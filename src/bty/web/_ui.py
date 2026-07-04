@@ -854,6 +854,22 @@ def register_ui_routes(
             image_events = _events_log.list_events(
                 conn, subject_kind="catalog", limit=_events_log.RECENT_EVENTS_LIMIT
             )
+            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+        # Per-row ramboot warm state: one poll of nbdmux's /exports
+        # per page render (same shape as the /ui/machines pill code
+        # at line ~470). Blank / unreachable nbdmux -> the column
+        # falls back to "-" and the Pre-warm button hides.
+        warm_status_by_ref: dict[str, str] = {}
+        if nbdmux_url:
+            try:
+                from nbdmux import client as nbdmux_client
+
+                exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
+                warm_status_by_ref = {
+                    str(e.get("name")): str(e.get("status") or "") for e in exports if e.get("name")
+                }
+            except Exception:
+                warm_status_by_ref = {}
 
         # ``?q=<text>`` is a substring filter across the name, format,
         # arch, and ref so an operator typing "freebsd" sees only the
@@ -914,6 +930,8 @@ def register_ui_routes(
             preserved=preserved,
             flash=flash,
             flash_kind="danger" if flash else None,
+            warm_status_by_ref=warm_status_by_ref,
+            nbdmux_configured=bool(nbdmux_url),
         )
 
     @app.get(
@@ -1324,6 +1342,126 @@ def register_ui_routes(
                     "/ui/images?error=already+exists",
                     status_code=status.HTTP_303_SEE_OTHER,
                 )
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+
+    # ----- ramboot pre-warm (per-image action buttons) --------------------
+
+    @app.post(
+        "/ui/images/{ref}/prewarm",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_image_prewarm(ref: str, request: Request) -> RedirectResponse:
+        """Enqueue an nbdmux warm for one catalog ref.
+
+        Looks up the ``catalog_entries`` row by ``bty_image_ref`` for
+        its src URL + format hint, resolves the configured nbdmux
+        URL, then POSTs to nbdmux ``/exports`` via
+        :func:`nbdmux.client.warm_export`. The row's Warm column
+        picks up the resulting queued / fetching / decompressing /
+        ready state on the next page render (the shared list_exports
+        poll in ``_render_images_page``). Errors surface as
+        ``?error=`` on the /ui/images redirect and land in the
+        events log as ``ramboot.prewarm.failed``.
+        """
+        from nbdmux import client as nbdmux_client
+
+        with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT src, name, format FROM catalog_entries WHERE bty_image_ref = ?",
+                (ref,),
+            ).fetchone()
+            if row is None:
+                return RedirectResponse(
+                    "/ui/images?error=" + urllib.parse.quote(f"unknown ref: {ref}", safe=""),
+                    status_code=status.HTTP_303_SEE_OTHER,
+                )
+            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+        if not nbdmux_url:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote("nbdmux not configured (Settings > Ramboot)", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        try:
+            nbdmux_client.warm_export(
+                name=ref,
+                src_url=row["src"],
+                format_hint=row["format"] or None,
+                server=nbdmux_url,
+                timeout=5.0,
+            )
+        except nbdmux_client.NbdmuxError as exc:
+            with _db.open_db(state_path) as conn:
+                _events_log.record(
+                    conn,
+                    kind="ramboot.prewarm.failed",
+                    summary=f"prewarm failed: {row['name']}: {exc}",
+                    subject_kind="catalog",
+                    subject_id=row["src"],
+                    actor="operator",
+                    source_ip=_client_ip(request),
+                    details={"ref": ref, "error": str(exc)},
+                )
+                conn.commit()
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"prewarm failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="ramboot.prewarm.requested",
+                summary=f"prewarm requested: {row['name']}",
+                subject_kind="catalog",
+                subject_id=row["src"],
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"ref": ref, "src": row["src"]},
+            )
+            conn.commit()
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post(
+        "/ui/images/{ref}/unwarm",
+        include_in_schema=False,
+        dependencies=[Depends(require_ui_auth)],
+    )
+    def ui_image_unwarm(ref: str, request: Request) -> RedirectResponse:
+        """Delete an nbdmux export for one catalog ref.
+
+        Idempotent: nbdmux returns 404 for an unknown export name,
+        which :func:`nbdmux.client.remove_export` treats as no-op.
+        Only transport / server failures surface as ``?error=``.
+        """
+        from nbdmux import client as nbdmux_client
+
+        with _db.open_db(state_path) as conn:
+            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+        if not nbdmux_url:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("nbdmux not configured", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        try:
+            nbdmux_client.remove_export(name=ref, server=nbdmux_url, timeout=5.0)
+        except nbdmux_client.NbdmuxError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"unwarm failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="ramboot.prewarm.removed",
+                summary=f"prewarm removed: {ref}",
+                subject_kind="catalog",
+                subject_id=ref,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={"ref": ref},
+            )
+            conn.commit()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- boot artifacts ------------------------------------------------
