@@ -1412,6 +1412,38 @@ def test_ramboot_bind_rejected_when_ref_not_in_nbdmux(
     assert "Pre-warm" in r.text
 
 
+def test_ramboot_bind_502_when_nbdmux_unreachable(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """boot_mode=ramboot bind + ref set, nbdmux URL configured but
+    the daemon is unreachable -> HTTP 502 with detail naming
+    ``nbdmux unreachable``. Distinct from 422 (ref not in the ready
+    list) so the operator can tell "wire the daemon up" from
+    "warm the ref" at the JSON API layer. Also confirms no
+    half-written row lands: a subsequent ``GET /machines/<mac>``
+    is 404, so a failed bind can't leave a phantom record."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    mac = "aa:bb:cc:dd:ee:c0"
+
+    def _boom(server: str, timeout: float = 2.0) -> list[dict[str, object]]:
+        raise nbdmux_client.NbdmuxError("simulated connection refused")
+
+    monkeypatch.setattr(nbdmux_client, "list_exports", _boom)
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={"boot_mode": "ramboot", "bty_image_ref": "e" * 64},
+        cookies=AUTH,
+    )
+    assert r.status_code == 502
+    assert "nbdmux unreachable" in r.text
+    # Defence-in-depth: the 502 must not have half-written a
+    # machine record before the exception fired.
+    r2 = app_client.get(f"/machines/{mac}", cookies=AUTH)
+    assert r2.status_code == 404
+
+
 def test_ramboot_bind_rejected_when_nbdmux_unset(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
