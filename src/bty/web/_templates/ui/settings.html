@@ -333,7 +333,23 @@
                     state. The NBD listener (port 10809) is derived
                     from the same host.
                     {% if nbdmux_url_effective %}
-                    Currently effective: <code>{{ nbdmux_url_effective }}</code>.
+                    Currently effective: <code>{{ nbdmux_url_effective }}</code>
+                    {# Reachability probe result: green pill when
+                       /healthz returned 200 at render time, red pill
+                       otherwise. Blank URL renders no pill (nothing
+                       to probe). Lets the operator spot a typo
+                       without submitting a ramboot bind and getting
+                       the 502. #}
+                    {% if nbdmux_reachable is sameas true %}
+                    <span class="badge bg-success ms-1" title="/healthz returned 200 at page render time">
+                        <i class="bi bi-broadcast me-1"></i>reachable
+                    </span>
+                    {% elif nbdmux_reachable is sameas false %}
+                    <span class="badge bg-danger ms-1" title="/healthz did NOT return 200 at page render time (typo? daemon down? firewall?)">
+                        <i class="bi bi-exclamation-triangle me-1"></i>unreachable
+                    </span>
+                    {% endif %}
+                    .
                     {% else %}
                     Currently effective: <span class="text-muted">(none; ramboot unavailable)</span>.
                     {% endif %}
