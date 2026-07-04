@@ -13,6 +13,7 @@ hermetic and fast.
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 import pytest
@@ -587,3 +588,146 @@ def test_stream_src_no_total_means_no_truncation_check(
     assert total is None
     received = b"".join(chunks)
     assert received == body
+
+
+# -----------------------------------------------------------------------
+# classify_source / fetch_bytes / load_source -- URL/oras/path dispatch
+# -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "source,kind",
+    [
+        ("./local.toml", "path"),
+        ("/etc/bty/catalog.toml", "path"),
+        ("catalog.toml", "path"),
+        ("file:///abs/catalog.toml", "path"),
+        ("http://example.com/catalog.toml", "http"),
+        ("https://example.com/catalog.toml", "http"),
+        ("oras://ghcr.io/safl/nosi:v1", "oras"),
+    ],
+)
+def test_classify_source_dispatches_by_scheme(source: str, kind: str) -> None:
+    assert catalog.classify_source(source) == kind
+
+
+def test_classify_source_rejects_http_without_host() -> None:
+    with pytest.raises(ValueError, match="missing a host"):
+        catalog.classify_source("http:///catalog.toml")
+
+
+def test_classify_source_rejects_unknown_scheme() -> None:
+    with pytest.raises(ValueError, match="must be a local path"):
+        catalog.classify_source("ftp://example.com/catalog.toml")
+
+
+def test_fetch_bytes_path_reads_file(tmp_path: Path) -> None:
+    body = b'version = 1\n[[images]]\nname = "demo"\nsrc = "https://x/y"\n'
+    p = tmp_path / "catalog.toml"
+    p.write_bytes(body)
+    assert catalog.fetch_bytes(str(p)) == body
+
+
+def test_fetch_bytes_file_scheme_reads_file(tmp_path: Path) -> None:
+    body = b"version = 1\n"
+    p = tmp_path / "catalog.toml"
+    p.write_bytes(body)
+    assert catalog.fetch_bytes(f"file://{p}") == body
+
+
+def test_fetch_bytes_http_calls_urlopen(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = b"version = 1\n"
+
+    class _Resp:
+        def read(self, n: int) -> bytes:
+            return body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a) -> None:
+            return None
+
+    called = {}
+
+    def _fake_urlopen(url, timeout=None):
+        called["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(catalog.urllib.request, "urlopen", _fake_urlopen)
+    got = catalog.fetch_bytes("https://example.com/catalog.toml")
+    assert got == body
+    assert called["url"] == "https://example.com/catalog.toml"
+
+
+def test_fetch_bytes_http_caps_response_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Return one byte MORE than the cap; the wrapper must refuse.
+    too_big = b"x" * (catalog.REMOTE_CATALOG_MAX_BYTES + 1)
+
+    class _Resp:
+        def read(self, n: int) -> bytes:
+            return too_big
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a) -> None:
+            return None
+
+    monkeypatch.setattr(catalog.urllib.request, "urlopen", lambda url, timeout=None: _Resp())
+    with pytest.raises(catalog.CatalogError, match="exceeded"):
+        catalog.fetch_bytes("https://example.com/catalog.toml")
+
+
+def test_fetch_bytes_oras_uses_resolve_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    """oras:// dispatches through withcache.oras.resolve_ref for the
+    blob URL + auth headers."""
+    body = b"version = 1\n"
+
+    class _Resp:
+        def read(self, n: int) -> bytes:
+            return body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a) -> None:
+            return None
+
+    calls = {}
+
+    def _fake_resolve(source: str, timeout=None):
+        calls["source"] = source
+        return types.SimpleNamespace(
+            blob_url="https://ghcr.io/v2/safl/nosi/blobs/sha256:abc",
+            headers={"Authorization": "Bearer stub"},
+            size=len(body),
+            digest="sha256:abc",
+        )
+
+    def _fake_urlopen(req, timeout=None):
+        calls["urlopen_url"] = req.full_url
+        calls["urlopen_hdr"] = req.headers.get("Authorization")
+        return _Resp()
+
+    from withcache import oras as _oras
+
+    monkeypatch.setattr(_oras, "resolve_ref", _fake_resolve)
+    monkeypatch.setattr(catalog.urllib.request, "urlopen", _fake_urlopen)
+    got = catalog.fetch_bytes("oras://ghcr.io/safl/nosi:v1")
+    assert got == body
+    assert calls["source"] == "oras://ghcr.io/safl/nosi:v1"
+    assert calls["urlopen_url"] == "https://ghcr.io/v2/safl/nosi/blobs/sha256:abc"
+    assert calls["urlopen_hdr"] == "Bearer stub"
+
+
+def test_load_source_fetches_then_parses(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    body = (
+        b"version = 1\n"
+        b'[[images]]\nname = "demo"\nsrc = "https://x/demo.img.zst"\nformat = "img.zst"\n'
+    )
+    p = tmp_path / "catalog.toml"
+    p.write_bytes(body)
+    cat = catalog.load_source(str(p))
+    assert len(cat) == 1
+    assert cat.by_name("demo").name == "demo"
