@@ -1272,8 +1272,8 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
     parser = argparse.ArgumentParser(
         prog=prog,
         description=(
-            "Stand up the bty-web + withcache compose stack in one shot. "
-            "Auto-detects install mode from your euid: as root, does the "
+            "Set up the bty-web + withcache + nbdmux compose stack in one "
+            "shot. Auto-detects install mode from your euid: as root, does the "
             "full install (TFTP sidecar + Podman Quadlet units installed "
             f"to {QUADLET_SYSTEM_DIR} + systemctl start, so the stack "
             "survives reboots); as a regular user, does the compose-only "
@@ -2046,7 +2046,7 @@ def main(argv: list[str] | None = None, *, prog: str = "bty-lab") -> None:
     parser = argparse.ArgumentParser(
         prog=prog,
         description=(
-            f"{prog}: bootstrap and manage a bty-web + withcache container deploy.\n\n"
+            f"{prog}: bootstrap and manage a bty-web + withcache + nbdmux container deploy.\n\n"
             "Subcommands:\n"
             f"  {prog} init [DEST]      Emit ready-to-run compose files (no side effects).\n"
             f"  {prog} deploy [DEST]    Emit files + auto-fill envvars + bring up the\n"
