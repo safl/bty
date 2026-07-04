@@ -655,7 +655,8 @@ def create_app(
         publish_state_changed()
         # Boot-mode decision tree (highest priority first):
         #   - bty-tui                       -> live env, interactive wizard
-        #   - sanboot                       -> iPXE sanboot the local disk
+        #   - ipxe-exit                     -> iPXE ``sanboot`` verb / firmware
+        #                                      exit -- boots the local disk
         #   - bty-flash-always / -once + ref + target disk -> live env auto-flash
         #     EXCEPT bty-flash-always with saw_flasher_boot set -> the
         #     ipxe-exit chain once (one-shot loop-break, see below), so
@@ -1124,10 +1125,10 @@ def create_app(
           ``tui``, OR a flash policy that can't be auto-resolved
           (no target serial, orphan ref). ``bty`` drops the operator
           into the wizard with the server's catalog pre-loaded.
-        * ``{"mode": "exit"}`` -- boot_mode=sanboot (handled at the
+        * ``{"mode": "exit"}`` -- boot_mode=ipxe-exit (handled at the
           iPXE layer, so the box doesn't reach the live env) or any
           unrecognised policy. ``bty`` exits cleanly; the firmware /
-          sanboot path handles boot.
+          ipxe-exit path handles boot.
 
         Unknown MACs auto-register (matches the ``/pxe/{mac}`` iPXE
         endpoint) with boot_mode=bty-tui so a hand-launched ``bty
@@ -1335,10 +1336,10 @@ def create_app(
             plan = {"mode": "inventory"}
             offer_kind = "plan:inventory"
         else:
-            # boot_mode=sanboot (or any other / missing) -- ``bty``
-            # has nothing to do (sanboot is handled at the iPXE layer,
+            # boot_mode=ipxe-exit (or any other / missing) -- ``bty``
+            # has nothing to do (ipxe-exit is handled at the iPXE layer,
             # the box never chains into the live env); plan mode=exit
-            # means "exit cleanly, let firmware / sanboot handle boot".
+            # means "exit cleanly, let firmware / disk boot".
             plan = {"mode": "exit"}
             offer_kind = f"plan:exit:{policy}"
 
