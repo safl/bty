@@ -1,0 +1,27 @@
+# Podman Quadlet unit -> generates nbdmux.service.
+# Install: copy into /etc/containers/systemd/ (root) then `systemctl daemon-reload`.
+#
+# nbdmux is the NBD-export multiplexer that serves boot_mode=ramboot
+# targets. bty-web polls its export status at /pxe/{mac}/plan render
+# time; a slow-starting nbdmux would give the first bty-web contacts
+# a ramboot=interactive fallback until it's up.
+[Unit]
+Description=nbdmux NBD-export multiplexer
+After=network-online.target withcache.service
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/safl/nbdmux:latest
+AutoUpdate=registry
+PublishPort=8082:8082
+PublishPort=10809:10809
+Volume=nbdmux-data:/data
+Environment=NBDMUX_ADMIN_PASSWORD=bty-lab
+# Point nbdmux at withcache so the warm pipeline can fetch image bytes.
+Environment=NBDMUX_WITHCACHE_URL=http://withcache:8081
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target default.target

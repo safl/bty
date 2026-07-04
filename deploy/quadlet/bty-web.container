@@ -5,7 +5,7 @@
 # /etc/containers/systemd/ (root), then `systemctl daemon-reload`.
 [Unit]
 Description=bty-web
-After=network-online.target withcache.service
+After=network-online.target withcache.service nbdmux.service
 Wants=network-online.target
 
 [Container]
