@@ -26,3 +26,13 @@ Install, the USB / portable-catalog / PXE-server delivery shapes, the bty-web
 HTTP API, and ORAS-published images and catalogs all live at:
 
 ### → <https://safl.dk/bty>
+
+## Ecosystem sidecars
+
+The container deploy runs bty-web alongside two sibling services
+that are built and released independently:
+
+- [safl/withcache](https://github.com/safl/withcache) -- URL-keyed
+  artifact cache; bty's preferred image-bytes source.
+- [safl/nbdmux](https://github.com/safl/nbdmux) -- HTTP-controlled
+  NBD-export multiplexer that serves `boot_mode=ramboot` targets.
