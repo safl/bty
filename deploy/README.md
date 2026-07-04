@@ -23,9 +23,10 @@ session secret stays random) and runs `podman compose --profile tftp
 pull` + `up -d`. Change the passwords in `/opt/bty/envvars` before
 exposing past trusted LAN.
 
-`bty-web` reads `$BTY_WITHCACHE_URL` from the compose file at boot and
-auto-wires withcache as its image source -- no UI configuration step on
-first boot.
+`bty-web` reads the `[withcache]` and `[nbdmux]` blocks of the
+bind-mounted `bty.toml` (`$BTY_CONFIG_FILE=/etc/bty/bty.toml`) at
+boot and auto-wires the sidecars as its image + ramboot sources --
+no UI configuration step on first boot.
 
 ## Subcommands
 
@@ -90,8 +91,9 @@ If you'd rather inspect the units before installing, `bty-lab init
 
 ## How the caching behaves
 
-`BTY_WITHCACHE_URL` wires bty to the cache. For an https image origin, bty
-does a cheap `HEAD` to withcache: when it's cached, the boot plan points the
+The bind-mounted `bty.toml`'s `[withcache]` block wires bty to the cache. For
+an https image origin, bty does a cheap `HEAD` to withcache: when it's
+cached, the boot plan points the
 client at withcache; when the cache lacks it (or is unreachable), bty serves
 the origin directly. The probe also warms an auto-fetch withcache -- a miss
 enqueues the background fill -- so the next machine you provision hits the

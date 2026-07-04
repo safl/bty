@@ -59,8 +59,10 @@ uvx bty-lab upgrade /opt/bty     # auto-detects compose- vs Quadlet-managed
 CLI's bty version, `podman compose pull`s, then restarts (or `systemctl
 restart`s for Quadlet-managed stacks).
 
-`bty-web` reads `$BTY_WITHCACHE_URL` (set by the compose) at boot and
-auto-wires withcache as its image source -- no UI configuration step.
+`bty-web` reads the `[withcache]` and `[nbdmux]` blocks of the
+bind-mounted `bty.toml` (`$BTY_CONFIG_FILE=/etc/bty/bty.toml`) at
+boot and auto-wires the sidecars as its image + ramboot sources --
+no UI configuration step.
 For inspect-then-apply control, use `bty-lab init` instead; it emits the
 same files without side effects. Full details:
 [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md).
