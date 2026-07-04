@@ -29,6 +29,36 @@ falls back cleanly when nbdmux is unset or unreachable: the Warm
 column shows "-" / "not warmed" and the action forms hide so a
 fresh deploy can't click into an action that has nowhere to go.
 
+### Fixed
+
+Follow-on tech-debt pass on the same release. The bind-time
+ramboot validator's rejection message still told operators to
+"populate it via nbdmux's dashboard"; it now points them at the
+Pre-warm button on `/ui/images` (with the direct nbdmux POST as
+the fallback). The unwarm handler was writing `subject_id=<ref>`
+while the requested/failed siblings used `subject_id=<src>`, so
+`/ui/events?subject_id=<src>` missed the removal row; unwarm now
+carries the src too, and the convention is pinned by a test.
+
+### Changed
+
+Two dead `if u.cached:` branches in `list_images_endpoint` and
+`list_catalog_toml` that synthesised URLs pointing at the
+v0.60.0-removed `/images/{sha}` proxy route were ripped, along
+with the now-orphaned `_request_origin` helper. Docstrings on
+both endpoints and the `resolved_src` schema comment updated to
+name only the downstream consumers that actually exist today.
+AGENTS.md's stable-Python-API bullet dropped `bty.oras` (moved
+to `withcache.oras` in v0.59.0) and the `boot_policy` rename
+version was corrected from v0.23.0 to v0.25.0.
+
+The `nbdmux.list_exports` poll that ran verbatim in three sites
+(`/ui/machines` row pills, `/ui/images` Warm column, PXE plan
+emit) moved into `bty.web._ramboot.status_by_ref`. The bind-time
+PUT /machines validator keeps its inline call because it maps a
+`NbdmuxError` to HTTP 502 distinctly from "ref not ready", which
+the helper's swallow-and-empty-dict shape would collapse.
+
 ## [0.65.16] - 2026-07-04
 
 ### Added
