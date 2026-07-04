@@ -270,3 +270,49 @@ def test_init_db_does_not_touch_existing_bak_on_idempotent_init(tmp_path: Path) 
     sentinel.write_bytes(b"older-rotation-sentinel")
     _db.init_db(state)  # idempotent; should not touch the .bak
     assert sentinel.read_bytes() == b"older-rotation-sentinel"
+
+
+# -----------------------------------------------------------------------
+# row_value: the ``key in row.keys()`` guard that avoids the
+# ``key in row`` footgun (which searches values, not column names)
+# -----------------------------------------------------------------------
+
+
+def _one_row(sql: str, params: tuple = ()) -> sqlite3.Row:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE t (a TEXT, b INTEGER, c TEXT)")
+    conn.execute("INSERT INTO t VALUES (?, ?, ?)", ("alpha", 42, None))
+    return conn.execute(sql).fetchone()
+
+
+def test_row_value_returns_column_value_when_present() -> None:
+    row = _one_row("SELECT a, b, c FROM t")
+    assert _db.row_value(row, "a") == "alpha"
+    assert _db.row_value(row, "b") == 42
+    assert _db.row_value(row, "c") is None
+
+
+def test_row_value_returns_default_when_column_absent() -> None:
+    """The whole reason ``row_value`` exists: a partial SELECT (or a
+    row from before a column was added) shouldn't raise -- callers
+    can rely on ``default`` for the missing-column fallback."""
+    row = _one_row("SELECT a FROM t")
+    assert _db.row_value(row, "b", default=99) == 99
+
+
+def test_row_value_default_none() -> None:
+    row = _one_row("SELECT a FROM t")
+    # No explicit default -> None.
+    assert _db.row_value(row, "b") is None
+
+
+def test_row_value_does_not_match_on_values() -> None:
+    """Regression guard: the naive ``key in row`` (without ``.keys()``)
+    would iterate the ROW's VALUES, so a query for column name
+    ``"alpha"`` on a row where column ``a=="alpha"`` would falsely
+    succeed. row_value must NOT do that -- ``.keys()`` is column
+    names, not values."""
+    row = _one_row("SELECT a FROM t")
+    # ``alpha`` is a VALUE, not a column name; must return default.
+    assert _db.row_value(row, "alpha", default="MISS") == "MISS"
