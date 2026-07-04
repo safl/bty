@@ -730,13 +730,13 @@ def create_app(
                     mac=normalised, machine=machine, drive=drive, policy=policy
                 )
                 clear_saw_flasher_boot = True
-                offer_kind = "bty-inventory-sanboot"
+                offer_kind = "bty-inventory-ipxe-exit"
                 offer_summary = (
                     f"{normalised} booting disk (drive {drive}) after inventory; "
                     f"bty-inventory re-arms on next netboot"
                 )
                 offer_details = {
-                    "offer": "sanboot",
+                    "offer": "ipxe-exit",
                     "sanboot_drive": drive,
                     "after_inventory": True,
                 }
@@ -761,15 +761,15 @@ def create_app(
         elif policy == "ipxe-exit":
             # iPXE boots the local disk itself (drive override, default
             # 0x80), with ``|| exit`` falling back to the firmware boot
-            # order. Checked before the generic ``ref`` branch so a
-            # sanboot machine with an image bound still sanboots rather
-            # than falling through to the ``exit`` (local) template.
+            # order. Checked before the generic ``ref`` branch so an
+            # ipxe-exit machine with an image bound still boots the disk
+            # rather than falling through to the ``exit`` (local) template.
             drive = machine.get("sanboot_drive") or _models.DEFAULT_SANBOOT_DRIVE
             template = jinja.get_template("ipxe_sanboot.j2")
             rendered = template.render(mac=normalised, machine=machine, drive=drive, policy=policy)
             offer_kind = "ipxe-exit"
-            offer_summary = f"{normalised} offered sanboot (iPXE boots local drive {drive})"
-            offer_details = {"offer": "sanboot", "sanboot_drive": drive}
+            offer_summary = f"{normalised} offered ipxe-exit (iPXE boots local drive {drive})"
+            offer_details = {"offer": "ipxe-exit", "sanboot_drive": drive}
         elif policy == "ramboot":
             # ramboot chains the slim ``ramboot-init`` live env (kernel
             # + initrd only, no squashfs). The initramfs nbd-client
@@ -882,16 +882,16 @@ def create_app(
                     )
                     if policy == "bty-flash-always":
                         clear_saw_flasher_boot = True
-                    offer_kind = f"{policy}-sanboot"
+                    offer_kind = f"{policy}-ipxe-exit"
                     offer_summary = f"{normalised} booting just-flashed disk (drive {drive}); " + (
                         "bty-flash-always re-arms on next netboot"
                         if policy == "bty-flash-always"
                         else "bty-flash-once complete (stays on this disk)"
                     )
                     offer_details = {
-                        "offer": "sanboot",
+                        "offer": "ipxe-exit",
                         "sanboot_drive": drive,
-                        "sanboot_after_flash": True,
+                        "ipxe_exit_after_flash": True,
                     }
                 else:
                     template = jinja.get_template("ipxe_flash.j2")

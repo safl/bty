@@ -2502,7 +2502,7 @@ def test_pxe_hit_records_pxe_offered_event(app_client: TestClient) -> None:
     assert ev["kind"] == "netboot.pxe.offered"
     assert ev["subject_id"] == "aa:bb:cc:dd:ee:f0"
     assert ev["actor"] == "pxe-client"
-    assert ev["details"]["offer"] == "sanboot"
+    assert ev["details"]["offer"] == "ipxe-exit"
     assert ev["details"]["boot_mode"] == "ipxe-exit"
 
 
@@ -3553,7 +3553,7 @@ def test_reflash_lifecycle_bty_flash_always_alternates(
         PXE  -> flash chain (offer=bty-flash-always)
         /boot?mac= (arming step)
         /pxe/{mac}/done (live env finished -> last_flashed_at set)
-        PXE  -> sanboot the just-flashed disk (offer=bty-flash-always-sanboot)
+        PXE  -> sanboot the just-flashed disk (offer=bty-flash-always-ipxe-exit)
                 + bit CLEARED
         PXE  -> flash chain again (offer=bty-flash-always)
                 + bit stays 0 (cleared until next /boot)
@@ -3576,7 +3576,7 @@ def test_reflash_lifecycle_bty_flash_always_alternates(
     # Iter 2: PXE -> sanboot the just-flashed disk; bit cleared.
     r = app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
     assert r.status_code == 200
-    assert _latest_offer_kind(app_client, mac) == "bty-flash-always-sanboot"
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-always-ipxe-exit"
     assert _saw_flasher_bit(app_client, mac) == 0, "bit must be cleared after sanboot serve"
 
     # Iter 3: PXE again (no /boot fetch since iter 2) -> flash chain.
@@ -3603,8 +3603,8 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
         PXE  -> flash chain (offer=bty-flash-once)
         /boot?mac= (arming step)
         /pxe/{mac}/done (live env finished -> last_flashed_at set)
-        PXE  -> sanboot (offer=bty-flash-once-sanboot) + bit KEPT
-        PXE  -> sanboot again (offer=bty-flash-once-sanboot) + bit KEPT
+        PXE  -> sanboot (offer=bty-flash-once-ipxe-exit) + bit KEPT
+        PXE  -> sanboot again (offer=bty-flash-once-ipxe-exit) + bit KEPT
     """
     mac = "aa:bb:cc:dd:ee:a2"
     _seed_flashable_machine(app_client, mac, boot_mode="bty-flash-once", monkeypatch=monkeypatch)
@@ -3624,7 +3624,7 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
     # flash-once and flash-always, making flash-once reflash on
     # next /pxe).
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
-    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-ipxe-exit"
     assert _saw_flasher_bit(app_client, mac) == 1, (
         "REGRESSION: bty-flash-once must KEEP the bit armed (terminal state); "
         "clearing it would make the next /pxe serve the flash chain and reflash"
@@ -3632,7 +3632,7 @@ def test_reflash_lifecycle_bty_flash_once_is_terminal(
 
     # Iter 3: still sanboot -- forever, until operator re-saves.
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
-    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-ipxe-exit"
     assert _saw_flasher_bit(app_client, mac) == 1
 
 
@@ -3671,7 +3671,7 @@ def test_reflash_lifecycle_crashed_flasher_retries_chain(
     offer = _latest_offer_kind(app_client, mac)
     assert offer == "bty-flash-once", (
         f"REGRESSION (v0.33.24): armed without /done must re-serve the flash chain; "
-        f"got {offer!r}. Pre-fix served bty-flash-once-sanboot and stuck the box."
+        f"got {offer!r}. Pre-fix served bty-flash-once-ipxe-exit and stuck the box."
     )
     # The audit event details the retry reason for operator visibility.
     r = app_client.get(
@@ -3688,7 +3688,7 @@ def test_reflash_lifecycle_crashed_flasher_retries_chain(
 
     # Iter 3: NOW the sanboot consume fires (armed + last_flashed_at).
     app_client.get(f"/pxe/{mac}", headers={"Host": "bty.local:8080"})
-    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-sanboot"
+    assert _latest_offer_kind(app_client, mac) == "bty-flash-once-ipxe-exit"
 
 
 def test_reflash_lifecycle_inventory_crashed_live_env_retries(
@@ -3966,9 +3966,9 @@ def test_reflash_lifecycle_pxe_offered_event_per_iteration(
     offers = [e["details"]["offer_kind"] for e in events]
     # 4 /pxe hits -> 4 offers. Newest first: sanboot, flash, sanboot, flash.
     assert len(offers) >= 4, offers
-    assert offers[0] == "bty-flash-always-sanboot"
+    assert offers[0] == "bty-flash-always-ipxe-exit"
     assert offers[1] == "bty-flash-always"
-    assert offers[2] == "bty-flash-always-sanboot"
+    assert offers[2] == "bty-flash-always-ipxe-exit"
     assert offers[3] == "bty-flash-always"
 
 
