@@ -1513,6 +1513,46 @@ def test_pxe_ramboot_falls_back_when_export_drops_post_bind(
     assert "boot=live" in r.text
 
 
+def test_pxe_ramboot_falls_back_when_nbdmux_raises_at_chain_time(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Machine bound while nbdmux was healthy; nbdmux is
+    unreachable at PXE chain time (transport failure, timeout).
+    The chain-time check goes through
+    :func:`bty.web._ramboot.status_by_ref`, which swallows the
+    error and returns ``{}`` -> ``ramboot_ready`` is False -> the
+    plan falls back to ipxe_tui with a 200, NOT a 500. Guards
+    against a future refactor that lets the exception escape:
+    that would 500 every PXE contact until nbdmux comes back."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    ref = "c" * 64
+    mac = "aa:bb:cc:dd:ee:c1"
+    # Bind under healthy nbdmux so the row lands cleanly.
+    monkeypatch.setattr(
+        nbdmux_client,
+        "list_exports",
+        lambda server, timeout=2.0: [{"name": ref, "status": "ready"}],
+    )
+    r = app_client.put(
+        f"/machines/{mac}",
+        json={"boot_mode": "ramboot", "bty_image_ref": ref},
+        cookies=AUTH,
+    )
+    assert r.status_code == 200
+
+    # Now the daemon is unreachable at chain time.
+    def _boom(server: str, timeout: float = 2.0) -> list[dict[str, object]]:
+        raise nbdmux_client.NbdmuxError("simulated timeout")
+
+    monkeypatch.setattr(nbdmux_client, "list_exports", _boom)
+    r = app_client.get(f"/pxe/{mac}")
+    assert r.status_code == 200  # not a 500
+    assert "boot=ramboot" not in r.text
+    assert "boot=live" in r.text
+
+
 def test_pxe_sanboot_mode_uses_per_machine_drive_override(app_client: TestClient) -> None:
     """``sanboot_drive`` overrides the default 0x80 so multi-disk
     boxes can point iPXE at the right BIOS drive."""
