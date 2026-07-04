@@ -9,6 +9,35 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.12] - 2026-07-04
+
+### Fixed
+
+Seventh pass over the trio's audit sweep, all documentation.
+`PLAN.md`'s "Boot policy" section still named pre-v0.25.0
+values (`local` / `flash` / `flash-once` / `tui`); retitled to
+"Boot mode" and rewritten to name the current `ipxe-exit` /
+`bty-flash-always` / `bty-flash-once` / `bty-tui` /
+`bty-inventory` / `ramboot` values. `AGENTS.md` had three
+sanboot spots in the boot-mode narrative describing the
+`saw_flasher_boot` bit consumption; all three now say
+"ipxe-exit chain" so the wording matches BOOT_MODES + the
+event log's Pass-5 write-time strings.
+
+The `docs/src/flows.md` events reference for
+`netboot.pxe.offered` advertised `details.offer` values that
+Pass 5 renamed (`sanboot`) or that never got written as bare
+values (`flash` / `tui` / `inventory`); the table row now names
+what actually gets written and points at `offer_kind` for the
+disambiguated string. `walkthrough-ramboot.md`'s decision-table
+cell `ipxe-exit (sanboot)` now says
+`ipxe-exit (iPXE sanboot verb on BIOS / firmware exit on UEFI)`
+so the parenthetical describes behaviour rather than suggesting
+`sanboot` is an alias.
+
+Two more "stand up" CLAUDE.md-rule violations (bty-media/README
+and one `_app.py` comment) now say "set up".
+
 ## [0.65.11] - 2026-07-04
 
 ### Fixed
