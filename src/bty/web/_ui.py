@@ -31,6 +31,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from jinja2 import Environment
+from nbdmux import client as nbdmux_client
 from pydantic import ValidationError
 
 import bty
@@ -42,6 +43,7 @@ from bty.web import (
     _db,
     _events_log,
     _labels,
+    _ramboot,
     _releases,
     _settings_store,
     _sysconfig,
@@ -467,24 +469,14 @@ def register_ui_routes(
                 conn, subject_kind="machine", limit=_events_log.RECENT_EVENTS_LIMIT
             )
             nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
-        # Per-row ramboot status: query nbdmux's /exports once per
-        # page render. Since v0.65.0 the warming pipeline lives in
-        # nbdmux (no local cache table); the row template renders
-        # the resulting status pill under the boot-mode badge when
-        # boot_mode=ramboot.
-        ramboot_status_by_ref: dict[str, str] = {}
-        if nbdmux_url:
-            try:
-                from nbdmux import client as nbdmux_client
-
-                exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
-                ramboot_status_by_ref = {
-                    str(e.get("name")): str(e.get("status") or "") for e in exports if e.get("name")
-                }
-            except Exception:
-                # Daemon unreachable / network blip; the page still
-                # renders, just without the per-row pill.
-                ramboot_status_by_ref = {}
+        # Per-row ramboot status: one nbdmux ``/exports`` poll per
+        # page render, keyed by ref. Since v0.65.0 the warming
+        # pipeline lives in nbdmux (no local cache table); the row
+        # template renders the resulting status pill under the
+        # boot-mode badge when boot_mode=ramboot. Blank URL or an
+        # unreachable daemon collapses to ``{}`` -- the page still
+        # renders, just without the per-row pill.
+        ramboot_status_by_ref = _ramboot.status_by_ref(nbdmux_url)
         machines = [_row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
         # from ``POST /ui/machines/{mac}/delete`` so the operator gets a
@@ -859,17 +851,7 @@ def register_ui_routes(
         # per page render (same shape as the /ui/machines pill code
         # at line ~470). Blank / unreachable nbdmux -> the column
         # falls back to "-" and the Pre-warm button hides.
-        warm_status_by_ref: dict[str, str] = {}
-        if nbdmux_url:
-            try:
-                from nbdmux import client as nbdmux_client
-
-                exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
-                warm_status_by_ref = {
-                    str(e.get("name")): str(e.get("status") or "") for e in exports if e.get("name")
-                }
-            except Exception:
-                warm_status_by_ref = {}
+        warm_status_by_ref = _ramboot.status_by_ref(nbdmux_url)
 
         # ``?q=<text>`` is a substring filter across the name, format,
         # arch, and ref so an operator typing "freebsd" sees only the
@@ -1364,8 +1346,6 @@ def register_ui_routes(
         ``?error=`` on the /ui/images redirect and land in the
         events log as ``ramboot.prewarm.failed``.
         """
-        from nbdmux import client as nbdmux_client
-
         with _db.open_db(state_path) as conn:
             row = conn.execute(
                 "SELECT src, name, format FROM catalog_entries WHERE bty_image_ref = ?",
@@ -1442,8 +1422,6 @@ def register_ui_routes(
         prior-DELETE leaves the row gone, in which case the event
         falls back to the ref so the audit trail still lands).
         """
-        from nbdmux import client as nbdmux_client
-
         with _db.open_db(state_path) as conn:
             row = conn.execute(
                 "SELECT src FROM catalog_entries WHERE bty_image_ref = ?", (ref,)

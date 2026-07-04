@@ -51,6 +51,7 @@ from bty.web import (
     _db,
     _labels,
     _models,
+    _ramboot,
     _release_mgr,
     _security,
     _settings_store,
@@ -788,15 +789,9 @@ def create_app(
             with _db.open_db(state_path) as conn:
                 nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
                 overlay_size = _settings_store.resolve_ramboot_overlay_size(conn)
-            ramboot_ready = False
-            if nbdmux_url and ref:
-                try:
-                    exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=2.0)
-                except nbdmux_client.NbdmuxError:
-                    exports = []
-                ramboot_ready = any(
-                    e.get("name") == str(ref) and e.get("status") == "ready" for e in exports
-                )
+            ramboot_ready = (
+                bool(ref) and _ramboot.status_by_ref(nbdmux_url).get(str(ref)) == "ready"
+            )
             if nbdmux_url and ref and ramboot_ready:
                 # Derive the NBD host from the configured HTTP control
                 # plane URL: same hostname, port 10809 (nbd-server's
