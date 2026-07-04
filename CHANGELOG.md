@@ -9,6 +9,27 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.14] - 2026-07-04
+
+### Fixed
+
+Ninth+tenth pass (combined) over the trio's audit sweep, all
+documentation. The /pxe handler in `_app.py` had ~15 more sanboot
+references in boot-mode-transition comments (Pass 9 flagged one at
+line 665; Pass 10 caught the rest); all now say "ipxe-exit chain"
+where the sentence is about the boot-mode enum value and its
+consumption. The TUI's inventory-mode handler had one matching
+spot. iPXE-verb references (`ipxe_sanboot.j2` template name,
+`sanboot --drive 0x80 || exit` in ipxe_unknown.j2) stay as-is.
+
+Two more `standing up` (the -ing form of the CLAUDE.md rule
+Pass 5/7/8 chased in the base + hyphenated forms) in `_jobs.py`
+and `test_web.py` now say "setting up".
+
+Two operator-facing doc spots (concepts.md line 79 and
+bty-netboot-pc.md line 91) still described boot-mode transitions
+as "sanboot"; both now name the "ipxe-exit chain".
+
 ## [0.65.13] - 2026-07-04
 
 ### Fixed
