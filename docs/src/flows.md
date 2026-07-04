@@ -374,7 +374,7 @@ Conditional:
 | `machine.deleted`               | Operator `DELETE /machines/{mac}`.                                                                          |
 | `machine.flashed`               | Live env `POST /pxe/{mac}/done`.                                                                            |
 | `machine.inventory`             | Live env `POST /pxe/{mac}/inventory`.                                                                       |
-| `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. `details.offer` records what was returned (`flash` / `sanboot` / `tui` / `inventory` / `ipxe-exit`) and `details.reason` annotates refusals (`no_target_disk` / `orphan_ref`). |
+| `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. `details.offer` records what was returned (`ipxe-exit` / `bty-inventory` / `bty-tui` / `unknown` / one of the flash offers) and `details.offer_kind` carries the specific offer_kind string (e.g. `bty-flash-once-ipxe-exit`, `bty-inventory-ipxe-exit`, `exit-fallback`, `unknown`). `details.reason` annotates refusals (`no_target_disk` / `orphan_ref`). |
 | `netboot.pxe.plan`                      | `GET /pxe/{mac}/plan` resolved a flash plan (image / target disk / boot args) for an auto-flash request.   |
 | `netboot.flasher.armed`                 | First `/boot/<artifact>?mac=` fetch in a cycle armed `saw_flasher_boot=1` (the live env booted). Idempotent; only the 0->1 transition lands a row. |
 | `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
