@@ -9,6 +9,20 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.15] - 2026-07-04
+
+### Changed
+
+UI-parity refactor across the bty/withcache/nbdmux trio. bty's two
+sticky-chrome CSS classes had a legacy ``bty-`` prefix (from
+landing first); the sibling services that copied the chrome
+verbatim already used ``sticky-header`` and ``brand-accent``.
+Renamed in ``_layout.html`` (CSS + HTML + JS selector) so a DOM
+inspector sees the same class names across all three consoles.
+No behavioural change; the other ``bty-*`` prefixed animation
+classes (bty-jump-flash, bty-copy-pulse, etc.) stay because they
+are bty-only.
+
 ## [0.65.14] - 2026-07-04
 
 ### Fixed
