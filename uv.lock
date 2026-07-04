@@ -84,7 +84,7 @@ requires-dist = [
     { name = "itsdangerous", marker = "extra == 'web'", specifier = ">=2.1" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1" },
-    { name = "nbdmux", specifier = ">=0.2.0" },
+    { name = "nbdmux", specifier = ">=0.2.19,<0.3" },
     { name = "python-multipart", marker = "extra == 'all'", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.9" },
     { name = "rich", marker = "extra == 'all'", specifier = ">=13" },
@@ -93,7 +93,7 @@ requires-dist = [
     { name = "tomlkit", marker = "extra == 'web'", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'all'", specifier = ">=0.30" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'web'", specifier = ">=0.30" },
-    { name = "withcache", specifier = ">=0.6.0" },
+    { name = "withcache", specifier = ">=0.8.0,<0.9" },
 ]
 provides-extras = ["tui", "web", "all"]
 
@@ -492,11 +492,11 @@ wheels = [
 
 [[package]]
 name = "nbdmux"
-version = "0.2.0"
+version = "0.2.19"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1e/18/cb3cef0e4f3c85997ca7d4d6f7908c03f18e9235988de8990382816ac779/nbdmux-0.2.0.tar.gz", hash = "sha256:5f241f8293588a49577e30a3b52833334671b6524be0c9b41e46be754299c158", size = 26381, upload-time = "2026-06-30T12:39:54.063Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/52/6f53ecb7178be789223f96b94bfa6a1a683bc6a88b0b5c16e179d51133f8/nbdmux-0.2.19.tar.gz", hash = "sha256:ec61b62dc8672baab6f9f68a73a400746d53aba94aaeb06f871797959b672954", size = 425315, upload-time = "2026-07-04T15:48:19.944Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/da/4d094fc1d15f2fc2565990fb387aeccbf543987748fdcdd3b2aba9cb47b7/nbdmux-0.2.0-py3-none-any.whl", hash = "sha256:280132dbd161673d51468b02564147fd102ebcf3c6f4fe9dc16047ee56b74300", size = 21174, upload-time = "2026-06-30T12:39:52.657Z" },
+    { url = "https://files.pythonhosted.org/packages/86/fb/cd31f9f2713142051735e2851c005ce0e35a4e224c489650b29d11a86c14/nbdmux-0.2.19-py3-none-any.whl", hash = "sha256:933ee1ec921f64abe43cc9a1a71460f6bda674edd30491a10c94dfaf1cd6beab", size = 406954, upload-time = "2026-07-04T15:48:18.451Z" },
 ]
 
 [[package]]
@@ -1032,13 +1032,13 @@ wheels = [
 
 [[package]]
 name = "withcache"
-version = "0.6.0"
+version = "0.8.10"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/db/b6/f54b191a39d632cabb1b90924d5d1ed60f8bd6e000802401f8ac704c7254/withcache-0.6.0.tar.gz", hash = "sha256:e654383f601de18281437be9a97f681d68f1e0a00a7f0b823ea5401160a2e240", size = 84962, upload-time = "2026-06-25T16:50:52.221Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/54/b8c64e680dedfa151ca4a16d9f854ec7268484a10d6ee62d0b59f797b9b3/withcache-0.8.10.tar.gz", hash = "sha256:884b24f1e165413d2b426bf8cc53b00a94f11dcd6550fe7106349174d98948d4", size = 452650, upload-time = "2026-07-04T15:50:35.827Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/c0/70e996c6c98943da71b49733905a3b0a2a1c2d289cc0acd33c85e727b542/withcache-0.6.0-py3-none-any.whl", hash = "sha256:171ec4292aeb8448a64b6d29d61a349fed11309e2c81583ff9951ebb47de141e", size = 68963, upload-time = "2026-06-25T16:50:45.673Z" },
-    { url = "https://files.pythonhosted.org/packages/c0/66/2ebe22b0a96fb937a234732704b37ccd746da4bac26d4338e66bbb1169c9/withcache-0.6.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:879d074cff80fcaa7425f0a2b8c2fbbd4011c82674f1159f4a4150311c922f91", size = 280469, upload-time = "2026-06-25T16:50:47.061Z" },
-    { url = "https://files.pythonhosted.org/packages/19/2a/4285b020b5d1f649034b8ea7034ba2ed66b047099fcab81e9007968c9e4d/withcache-0.6.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:4ae67ec18bec9266430ed3ce9fa8390fcc16a5c53b92c7f00fd9965c4b573a65", size = 262769, upload-time = "2026-06-25T16:50:48.403Z" },
-    { url = "https://files.pythonhosted.org/packages/ca/d5/5da2b7179a1c3acb310890651e211d0bb9cd34ab6e8f1f00becf79879b3e/withcache-0.6.0-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:3019ec6f71bedde5e88e6d41d5fc4a76a0438df047aa056fe48c5d71ef349f28", size = 280468, upload-time = "2026-06-25T16:50:49.754Z" },
-    { url = "https://files.pythonhosted.org/packages/88/93/14326c462c20b4090f0f443c15785808ad62a42d64bd49bfdb9b9ec0f994/withcache-0.6.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:45916e75946d6c5ab324e1817fcbb881f901b08ea2121363989d78c5542efb8c", size = 262771, upload-time = "2026-06-25T16:50:51.001Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/82/85473b42e355119837f1c108b047a7cbcc07ff9faeb2c1e1a10e2aa1657c/withcache-0.8.10-py3-none-any.whl", hash = "sha256:3d48633bd973216d989373c18175ce3c5c17cb3538f504cf49827583ccc0d017", size = 427941, upload-time = "2026-07-04T15:50:28.402Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/7b/d70b3d5a0e72ec9b752096be544e1be0ce07dd61fe34ff66de05bae9e973/withcache-0.8.10-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:8b568682a1c2566dce9160fce4b9e83cb4b176e94b39b7246b81c8e777568476", size = 639446, upload-time = "2026-07-04T15:50:29.944Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/34/f341faff9ae79e8013ca6b32a518881f379d2099a4ec8512bcbce2b26dd0/withcache-0.8.10-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:c147f1acd296659c295e5a50b02b45e2ae0666d20ff28a47b7a1a58f4414b2aa", size = 621749, upload-time = "2026-07-04T15:50:31.443Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/1c/14b6711765c1c6309a2e890d01431d2b50b1b7dffd0fcbaf0e8af0c4ad92/withcache-0.8.10-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:0fb6ba3716c00ad223ea0a1de07bb4dd436e7bc494e9ac7200a5bf0ffc8d0750", size = 639447, upload-time = "2026-07-04T15:50:32.667Z" },
+    { url = "https://files.pythonhosted.org/packages/13/56/656d58f97bc031918b45a6e02db16b4f4eed01a4071036fe5f872c0c2542/withcache-0.8.10-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:c4c4feaa3cc98b1534f65401cba63df40dc7f560d696365e4aaaecb1a1e84740", size = 621750, upload-time = "2026-07-04T15:50:34.232Z" },
 ]

@@ -22,15 +22,20 @@ dependencies = [
     # (signed-URL TTL kills HTTP/2 transfers mid-stream) and bty calls
     # ``withcache.oras`` directly for catalog-import-time digest
     # resolution. bty previously vendored its own ``bty.oras``; that
-    # module was moved upstream in withcache 0.6.0.
-    "withcache>=0.6.0",
+    # module was moved upstream in withcache 0.6.0. Floor tracks the
+    # current release line (0.8.x); pin below 0.9 so a major bump
+    # (release notes required) can't slip in on a floor lift.
+    "withcache>=0.8.0,<0.9",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
     # As of v0.2.0 nbdmux owns the fetch + decompress pipeline too
     # (it lifted the worker we previously kept here); bty only
     # validates readiness via ``nbdmux.client.list_exports`` at PXE
-    # chain time and at machine-binding time.
-    "nbdmux>=0.2.0",
+    # chain time and at machine-binding time. Floor pinned at the
+    # current bugfix release (0.2.19) so a fresh install doesn't ship
+    # with two-minor-old daemon fixes; ceiling below 0.3 so a major
+    # bump (bugs / API changes on that line) surfaces on floor lift.
+    "nbdmux>=0.2.19,<0.3",
 ]
 
 [project.optional-dependencies]
