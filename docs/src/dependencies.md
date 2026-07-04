@@ -57,8 +57,9 @@ by pip) plus:
 
 ## To run the PXE-flash server
 
-Run `bty-web` (and [withcache](https://github.com/safl/withcache)) as
-containers with podman; the only host dependency is the container runtime.
+Run `bty-web` (and its sidecars [withcache](https://github.com/safl/withcache)
+and [nbdmux](https://github.com/safl/nbdmux)) as containers with podman;
+the only host dependency is the container runtime.
 See [`deploy/README.md`](https://github.com/safl/bty/blob/main/deploy/README.md)
 for the compose / Quadlet layout.
 
@@ -66,6 +67,7 @@ for the compose / Quadlet layout.
 |---|---|---|
 | bty-web | `ghcr.io/safl/bty-web` | UI, per-MAC PXE plans, boot artifacts, and images over HTTP |
 | withcache | `ghcr.io/safl/withcache` | URL-keyed artifact cache; bty's preferred image source |
+| nbdmux | `ghcr.io/safl/nbdmux` | HTTP-controlled NBD export multiplexer for `boot_mode=ramboot` targets |
 | tftp *(profile `tftp`)* | `ghcr.io/safl/bty-tftp` | serves the ~1 MB iPXE bootfile over TFTP for BIOS / legacy clients |
 
 UEFI HTTP-Boot targets fetch the iPXE binary from bty-web over HTTP, so no
