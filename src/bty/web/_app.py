@@ -705,22 +705,22 @@ def create_app(
             offer_summary = f"{normalised} offered tui (operator picks via bty on tty1)"
             offer_details = {"offer": "bty-tui"}
         elif policy == "bty-inventory":
-            # Inventory-then-sanboot, alternating like bty-flash-always
+            # Inventory-then-ipxe-exit, alternating like bty-flash-always
             # (same saw_flasher_boot bit). When the box has booted the
             # live env (bit armed via GET /boot/...?mac=) AND the live
             # env actually POSTed inventory (``known_disks_at`` is set),
-            # serve a sanboot + clear the bit. Otherwise serve the
-            # live-env chain.
+            # serve the ipxe-exit chain + clear the bit. Otherwise serve
+            # the live-env chain.
             #
-            # the bit ALONE used to gate the sanboot serve.
+            # the bit ALONE used to gate the ipxe-exit serve.
             # If the live env crashed between fetching /boot and POSTing
             # /pxe/{mac}/inventory, the bit stayed armed and the server
-            # served sanboot of an empty disk -- the box failed to boot,
-            # cycled, the next /pxe cleared the bit, then re-served the
-            # inventory chain. One wasted sanboot cycle per crashed
-            # inventory. Now: armed-without-known_disks_at is treated as
-            # "live env didn't complete; retry the chain". Self-healing
-            # without the wasted sanboot.
+            # served the ipxe-exit chain against an empty disk -- the box
+            # failed to boot, cycled, the next /pxe cleared the bit, then
+            # re-served the inventory chain. One wasted ipxe-exit cycle
+            # per crashed inventory. Now: armed-without-known_disks_at is
+            # treated as "live env didn't complete; retry the chain".
+            # Self-healing without the wasted ipxe-exit cycle.
             armed = bool(machine.get("saw_flasher_boot"))
             has_inventory = bool(machine.get("known_disks_at"))
             if armed and has_inventory:
@@ -843,7 +843,7 @@ def create_app(
             # has picked a target disk by serial. Without this, ``bty``
             # in auto-flash mode would have no disk pinned and refuse
             # at the plan endpoint anyway -- but landing on ipxe.j2
-            # (sanboot fallback) here makes the misconfiguration
+            # (ipxe-exit fallback) here makes the misconfiguration
             # immediately visible: the box doesn't even chain into
             # the live env. The matching pxe.flash.no_target_disk
             # event surfaces the refusal on /ui/events.
@@ -856,21 +856,22 @@ def create_app(
                     # The box fetched a /boot artifact AND POSTed
                     # /pxe/{mac}/done since we served the flash chain --
                     # proof it actually flashed (not just iPXE-armed).
-                    # Serve sanboot of the just-flashed disk. The bit
-                    # handling is what makes the two modes differ:
+                    # Serve the ipxe-exit chain against the just-flashed
+                    # disk. The bit handling is what makes the two modes
+                    # differ:
                     #   * bty-flash-always: CLEAR the bit, so the next
                     #     real netboot flips back to the flash chain --
-                    #     the flash<->sanboot alternation that stops a
+                    #     the flash<->ipxe-exit alternation that stops a
                     #     PXE-first reflash loop.
                     #   * bty-flash-once: KEEP the bit. Terminal state:
-                    #     the box sanboots its disk from now on. The mode
-                    #     STAYS bty-flash-once; re-arms only when the
-                    #     operator re-saves the machine.
+                    #     the box boots its disk (via ipxe-exit) from now
+                    #     on. The mode STAYS bty-flash-once; re-arms only
+                    #     when the operator re-saves the machine.
                     #
-                    # armed-without-last_flashed_at used to
-                    # also serve sanboot. That sanbooted a half-flashed
+                    # armed-without-last_flashed_at used to also serve
+                    # the ipxe-exit chain. That booted a half-flashed
                     # disk -- bty-flash-always recovered via the next
-                    # cycle (wasted one sanboot); bty-flash-once was
+                    # cycle (wasted one ipxe-exit); bty-flash-once was
                     # TERMINALLY STUCK on the half-flashed disk and
                     # required operator intervention. Now armed-without-
                     # last_flashed_at re-serves the flash chain so the
@@ -1330,8 +1331,9 @@ def create_app(
             # already auto-posted /pxe/<mac>/inventory by the time it
             # GETs the plan; ``mode=inventory`` tells it to reboot rather
             # than wait at a wizard. The reboot lands on the
-            # saw_flasher_boot-armed /pxe contact, which sanboots the
-            # disk. (If the box never armed the bit, it just re-collects
+            # saw_flasher_boot-armed /pxe contact, which serves the
+            # ipxe-exit chain to boot the disk. (If the box never
+            # armed the bit, it just re-collects
             # next cycle -- self-healing, like bty-flash-always.)
             plan = {"mode": "inventory"}
             offer_kind = "plan:inventory"
@@ -1767,7 +1769,7 @@ def create_app(
         # server already knows the MAC when it renders ipxe_flash.j2,
         # so it's free to embed). A fetch here is therefore proof the
         # machine booted the flasher -- arm the bty-flash-always
-        # one-shot sanboot off it. HEADs arm too: a HEAD still means
+        # one-shot ipxe-exit chain off it. HEADs arm too: a HEAD still means
         # the firmware committed to fetching this artifact.
         raw_mac = request.query_params.get("mac")
         if raw_mac:
@@ -1897,8 +1899,8 @@ def create_app(
     def get_machine_lshw(mac: str) -> Response:
         """Raw ``lshw -json`` blob the live env last reported for this
         MAC, served verbatim for other tools to consume. 404 if the
-        machine has never posted lshw (e.g. only ever sanbooted, or the
-        live env's ``lshw`` failed)."""
+        machine has never posted lshw (e.g. only ever booted the disk
+        via ipxe-exit, or the live env's ``lshw`` failed)."""
         normalised = _normalise_mac(mac)
         with _db.open_db(state_path) as conn:
             row = conn.execute(
