@@ -58,8 +58,8 @@ def main(argv: list[str] | None = None, *, prog: str = "bty") -> None:
             "server-driven mode every knob (image, target disk, catalog\n"
             "overlay) comes from the bty-server's machine record, not the\n"
             "cmdline. --catalog is only useful for hand-driven runs.\n\n"
-            "To bootstrap a bty-web + withcache container deploy, use the\n"
-            "sibling ``bty-lab init`` script (runnable via\n"
+            "To bootstrap a bty-web + withcache + nbdmux container deploy,\n"
+            "use the sibling ``bty-lab init`` script (runnable via\n"
             "``uvx bty-lab init`` without installing)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
