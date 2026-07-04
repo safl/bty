@@ -805,7 +805,7 @@ def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
     # Pin a withcache URL via the override key.
     monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
-    # Force is_cached -> True without standing up a stub server.
+    # Force is_cached -> True without setting up a stub server.
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)
 
     r = app_client.post(

@@ -88,7 +88,7 @@ What happens on subsequent boots depends on the `boot_mode` you picked:
   already happened, and serves `ipxe-exit` so the firmware falls
   through to the freshly-flashed disk.
 - `bty-flash-always` (per-job CI cadence): the iPXE chain
-  alternates flash/sanboot per `/pxe` GET. The PXE-first firmware
+  alternates flash / ipxe-exit chain per `/pxe` GET. The PXE-first firmware
   order stays in effect; the alternation gives a freshly-flashed
   boot in between every flash so the operator's job runs on the
   intended image and the next job starts from a clean reflash.

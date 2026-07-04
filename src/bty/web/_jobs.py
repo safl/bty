@@ -96,7 +96,7 @@ class _BaseAsyncManager(Generic[StateT]):
         self._stopping = False
         # SSE state-change listener. Set via :meth:`set_state_listener`
         # in lifespan startup; the manager itself stays bus-agnostic so
-        # unit tests can drive it without standing up an event loop or
+        # unit tests can drive it without setting up an event loop or
         # publishing to a real bus.
         self._on_state_change: Callable[[StateT], None] | None = None
         # Per-key clock for :meth:`_fire_progress`'s throttle.
