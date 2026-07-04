@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.10] - 2026-07-04
+
+### Fixed
+
+Fifth pass over the trio's audit sweep. The `bty-lab deploy --help`
+opening and the top-level `bty-lab --help` synopsis said
+"Stand up ..." (against the CLAUDE.md prose rule) and named only
+"bty-web + withcache"; both now say "Set up" and name all three
+sidecars.
+
+Real UX bug on the machine detail form: the Sanboot-drive field's
+`data-policy-relevant` attribute listed `sanboot`, but the current
+boot-mode enum value is `ipxe-exit`, so the JS never marked the
+field relevant when the disk-boot policy that actually consumes
+it was selected. Rename the attribute + three matching form-text
+blurbs to `ipxe-exit`; the column name `sanboot_drive` and iPXE-verb
+references (label, title, help text) stay.
+
+The plan-emit code wrote `sanboot` into the event log via three
+paths (offer_kind `bty-inventory-sanboot` and `{policy}-sanboot`,
+plus `details.offer = "sanboot"`); external consumers filtering
+events had to know both names. Renamed the write-time values to
+`ipxe-exit`; historic rows stay as written. Two more comment
+leftovers in `_ui.py` and `ipxe_flash.j2`.
+
 ## [0.65.9] - 2026-07-04
 
 ### Fixed
