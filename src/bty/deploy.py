@@ -1242,7 +1242,7 @@ def init_main(argv: list[str] | None = None, *, prog: str = "bty-lab init") -> N
         file=sys.stderr,
     )
     print(
-        f"\nFor a one-shot stand-up (auto-fills envvars + brings up the\n"
+        f"\nFor a one-shot setup (auto-fills envvars + brings up the\n"
         f"stack), use `{prog.replace(' init', '')} deploy` instead.",
         file=sys.stderr,
     )
@@ -1266,7 +1266,7 @@ def deploy_main(argv: list[str] | None = None, *, prog: str = "bty-lab deploy") 
       need TFTP and so won't work in this mode.
 
     Side-effecting by design -- prefer :func:`init_main` when you want
-    the files without the stand-up. ``--force`` overwrites existing
+    the files without the setup. ``--force`` overwrites existing
     files (compose.yml, envvars, Quadlet units); it never bypasses
     missing prereqs."""
     parser = argparse.ArgumentParser(

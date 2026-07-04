@@ -2017,7 +2017,7 @@ class BtyTui:
         bty-web has the disks. Best-effort (the box reboots either way),
         but the outcome is printed to the console so a failed post isn't
         invisible -- a silent swallow here used to leave operators with
-        a box that re-armed sanboot yet reported no disks."""
+        a box that re-armed the ipxe-exit chain yet reported no disks."""
         if self._state.pxe_done_base is None or self._state.mac is None:
             return
         base = self._state.pxe_done_base
