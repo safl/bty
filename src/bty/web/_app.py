@@ -107,10 +107,18 @@ def _cached_display_tz(state_path: Path) -> ZoneInfo:
     try:
         with _db.open_db(state_path) as conn:
             tz: ZoneInfo = _settings_store.resolve_display_timezone(conn)
-    except Exception:
+    except (_settings_store.SettingValueError, sqlite3.Error) as exc:
         # A bad stored value or a transient DB error must not 500
-        # every template render. Fall back to UTC silently; the
-        # Settings page is where the operator sees the parse error.
+        # every template render. Fall back to UTC + log the reason:
+        # the Settings page surfaces the parse-error branch, but a
+        # ``sqlite3.OperationalError`` (locked DB, permissions,
+        # missing file mid-rotation) would previously be invisible
+        # to an operator staring at "why is my clock in UTC?".
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "display_tz resolve failed for %s (%s); using UTC", state_path, exc
+        )
         tz = ZoneInfo("UTC")
     _DISPLAY_TZ_CACHE[key] = tz
     return tz
