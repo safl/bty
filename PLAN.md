@@ -230,13 +230,19 @@ runner; if you need fleet-specific tweaks, bake them into the image.
 - **Target** - a block device on the machine being flashed.
 - **Machine record** (web only) - MAC-address-keyed assignment of
   image + optional hostname + boot policy + target disk serial.
-- **Boot policy** (web only) - what `GET /pxe/{mac}` returns:
-  `local` (sanboot), `flash` (live-env chain; plan endpoint
-  returns `mode=auto` for the unattended flash), `flash-once`
-  (same chain; flips to `local` after `POST /pxe/{mac}/done`),
-  or `tui` (live-env chain; plan returns `mode=interactive` so
-  ``bty`` drops the operator into the wizard; the auto-discovery
-  default for unknown MACs).
+- **Boot mode** (web only) - what `GET /pxe/{mac}` returns:
+  `ipxe-exit` (boots the local disk via the iPXE sanboot verb on
+  BIOS or firmware exit on UEFI), `bty-flash-always` (live-env
+  chain; the plan endpoint returns `mode=auto` for the unattended
+  flash on every netboot), `bty-flash-once` (same chain; the
+  plan-emit path observes `saw_flasher_boot + last_flashed_at`
+  and returns the `ipxe-exit` chain after the flash completes),
+  `bty-tui` (live-env chain; plan returns `mode=interactive` so
+  `bty` drops the operator into the wizard), `bty-inventory` (the
+  auto-discovery default for unknown MACs; the live env posts
+  disks and reboots into the ipxe-exit chain), or `ramboot`
+  (mounts the bound catalog image over NBD via the nbdmux
+  sidecar with overlayfs over tmpfs for writes).
 
 ## Flows
 
