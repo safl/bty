@@ -700,7 +700,7 @@ def register_ui_routes(
                     -- in sync. See PUT for the rationale on why
                     -- the completion signals need clearing too
                     -- (stale last_flashed_at + a future crashed
-                    -- flasher cycle = sanboot of a half-flashed disk).
+                    -- flasher cycle = ipxe-exit chain of a half-flashed disk).
                     saw_flasher_boot   = CASE
                         WHEN machines.boot_mode != excluded.boot_mode THEN 0
                         WHEN COALESCE(machines.bty_image_ref, '')

@@ -49,8 +49,8 @@ set bty-base http://{{ host }}
 # The kernel + initrd URLs (fetched by iPXE) carry ``?mac={{ mac }}``.
 # The server already knows this MAC (it rendered this template for it),
 # so it's free; the matching ``GET /boot/...?mac=`` is positive proof
-# THIS box booted the flasher. bty-web arms a one-shot sanboot of the
-# just-flashed disk on the next PXE contact off that, so
+# THIS box booted the flasher. bty-web arms a one-shot ipxe-exit chain
+# of the just-flashed disk on the next PXE contact off that, so
 # bty-flash-always boots the image once instead of reflashing in a loop
 # under PXE-first firmware. The query is ignored when serving the bytes.
 # The squashfs ``fetch=`` URL is DELIBERATELY NOT tagged: live-boot's
