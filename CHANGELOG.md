@@ -9,6 +9,27 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.11] - 2026-07-04
+
+### Fixed
+
+Sixth pass over the trio's audit sweep. The reference Quadlet
+tree at `deploy/quadlet/` was missing `nbdmux.container` even
+though nbdmux has been a first-class default sidecar since
+Pass 1's port unification; `deploy.py` generates it dynamically
+for runtime installs but the standalone reference an operator
+can copy directly into `/etc/containers/systemd/` was absent.
+Added, and `bty-web.container`'s `After=` now sequences bty-web
+behind both sidecars so a slow-starting nbdmux doesn't give the
+first bty-web contacts a ramboot=interactive fallback.
+
+One more Pass-5-missed plan-emit write path (the ipxe_unknown
+fallback's `offer_summary`) now writes `ipxe-exit` to the event
+log rather than `sanboot/exit`. Three more comment leftovers
+from the pre-v0.25.0 rename (`arm_flasher_boot` docstring, the
+TUI dispatch docstring for `inventory` mode, and the
+`ipxe_tui.j2` template comment).
+
 ## [0.65.10] - 2026-07-04
 
 ### Fixed
