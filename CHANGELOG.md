@@ -9,6 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.9] - 2026-07-04
+
+### Fixed
+
+Fourth pass over the trio's audit sweep. Five docs surfaces still
+described the deploy as "bty-web + withcache" only, missing
+nbdmux which the Pass 1 port unification made a first-class
+default sidecar: `dependencies.md`'s Services table,
+`bty-netboot-pc.md`'s numbered container list, `quickstart.md`
+(also dropped stale "docker-compose"), the `deploy.py` module
+docstring / compose banner / generated `/opt/bty/README.md` /
+`bty-lab init --help`, and the `bty` TUI's `--help` footer. The
+generated README's auto-discovery narrative also incorrectly
+claimed bty-web reads `BTY_WITHCACHE_URL`; the actual path is
+through the bind-mounted `bty.toml`'s `[withcache]` and
+`[nbdmux]` blocks.
+
+Three more `_app.py` comments plus the `ipxe_sanboot.j2` template
+comment named the pre-v0.25.0 `sanboot` boot-mode value where
+they should have been `ipxe-exit`; the iPXE verb of the same
+name stays, only the enum value was renamed.
+
 ## [0.65.8] - 2026-07-04
 
 ### Fixed
