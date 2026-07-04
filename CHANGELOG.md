@@ -9,6 +9,26 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.17] - 2026-07-04
+
+### Added
+
+bty is now the entry point for ramboot pre-warming. The Images
+pane (`/ui/images`) grew a Warm column populated at render time
+from nbdmux's `/exports`, and each row surfaces a Pre-warm form
+that POSTs to `/ui/images/{ref}/prewarm` -- bty resolves the ref
+to its catalog src + format hint and calls
+`nbdmux.client.warm_export` under the hood, so the operator never
+has to leave bty-web to warm a ref for ramboot serving. Rows
+whose export is queued, fetching, decompressing, or ready swap
+the Pre-warm button for Cancel / Unwarm, backed by
+`nbdmux.client.remove_export`. All three verbs are audited as
+`ramboot.prewarm.{requested,removed,failed}` events so the
+operator flow is debuggable from `/ui/events`. The pane still
+falls back cleanly when nbdmux is unset or unreachable: the Warm
+column shows "-" / "not warmed" and the action forms hide so a
+fresh deploy can't click into an action that has nowhere to go.
+
 ## [0.65.16] - 2026-07-04
 
 ### Added
