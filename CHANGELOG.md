@@ -9,6 +9,22 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.16] - 2026-07-04
+
+### Added
+
+Pass 12 test-coverage sweep. Four coverage gaps closed with new
+tests: `catalog.classify_source` / `fetch_bytes` / `load_source`
+(URL / oras / path dispatch, http response-size cap, oras
+`resolve_ref` header propagation); `_releases.boot_artifact_shas`
+(the Netboot-page sha256 manifest parser, including the malformed
+line + prefix-strip edge cases); `_reqctx.client_ip`
+X-Forwarded-For + trusted-proxy branches (fall-through paths that
+protect the audit log's client-IP correctness); and `_db.row_value`
+(the ``key in row.keys()`` guard vs the ``key in row`` footgun).
+
+Test count: 918 -> 949.
+
 ## [0.65.15] - 2026-07-04
 
 ### Changed
