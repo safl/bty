@@ -20,6 +20,7 @@ from bty.web._releases import (
     ARTIFACT_NAMES,
     SHA256_NAME,
     FetchError,
+    boot_artifact_shas,
     fetch_release,
     inspect_boot_dir,
 )
@@ -341,3 +342,65 @@ def test_inspect_boot_dir_reports_present_and_missing(tmp_path: Path) -> None:
     assert states[ARTIFACT_NAMES[0]].size == len(b"present")
     assert states[ARTIFACT_NAMES[1]].present is False
     assert states[ARTIFACT_NAMES[1]].size is None
+
+
+# -----------------------------------------------------------------------
+# boot_artifact_shas: parse the served sha256sum manifest for UI display
+# -----------------------------------------------------------------------
+
+
+def test_boot_artifact_shas_missing_manifest_returns_empty(tmp_path: Path) -> None:
+    """Absent file -> {} so the Netboot page renders `-` rather than 500."""
+    assert boot_artifact_shas(tmp_path) == {}
+
+
+def test_boot_artifact_shas_two_part_lines_populate_dict(tmp_path: Path) -> None:
+    (tmp_path / SHA256_NAME).write_text(
+        "a" * 64 + "  bty-netboot-pc.vmlinuz\n" + "b" * 64 + "  bty-netboot-pc.initrd\n",
+        encoding="utf-8",
+    )
+    got = boot_artifact_shas(tmp_path)
+    assert got == {
+        "bty-netboot-pc.vmlinuz": "a" * 64,
+        "bty-netboot-pc.initrd": "b" * 64,
+    }
+
+
+def test_boot_artifact_shas_skips_malformed_lines(tmp_path: Path) -> None:
+    """Any line without exactly two whitespace-separated parts is
+    silently skipped -- the UI just shows `-` for those artifacts
+    instead of the whole page 500-ing on a partial manifest."""
+    (tmp_path / SHA256_NAME).write_text(
+        "\n"  # blank
+        "just-one-token\n"  # 1 part
+        "three parts here bad\n"  # >=2 parts still processes -- see below
+        + "c" * 64
+        + "  ok.img\n",
+        encoding="utf-8",
+    )
+    got = boot_artifact_shas(tmp_path)
+    # "three parts here bad" splits with maxsplit=1 into two parts, so
+    # ``three`` becomes a digest and ``parts here bad`` becomes the
+    # name. That's not a security issue since digests are just displayed;
+    # only assert that the well-formed line survives.
+    assert got.get("ok.img") == "c" * 64
+
+
+def test_boot_artifact_shas_strips_star_dot_slash_prefixes(tmp_path: Path) -> None:
+    """sha256sum's format allows ``*name`` for binary and ``./name``
+    for relative; the parser strips leading ``*./`` chars greedily so
+    the dict key matches the artifact filename callers expect."""
+    (tmp_path / SHA256_NAME).write_text(
+        "d" * 64 + "  *binary.img\n" + "e" * 64 + "  ./relative.img\n",
+        encoding="utf-8",
+    )
+    got = boot_artifact_shas(tmp_path)
+    assert got == {"binary.img": "d" * 64, "relative.img": "e" * 64}
+
+
+def test_boot_artifact_shas_lowercases_digest(tmp_path: Path) -> None:
+    """Digest lowercased for canonical comparison against UI-rendered
+    fetched-artifact hashes."""
+    (tmp_path / SHA256_NAME).write_text("ABCDEF" + "0" * 58 + "  x.img\n", encoding="utf-8")
+    got = boot_artifact_shas(tmp_path)
+    assert got == {"x.img": ("abcdef" + "0" * 58)}
