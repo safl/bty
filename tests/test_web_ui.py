@@ -2592,6 +2592,58 @@ def test_ui_settings_ramboot_renders_card_and_form(client: TestClient) -> None:
     assert "ramboot unavailable" in body or "(none" in body
 
 
+def test_ui_settings_ramboot_shows_reachable_pill_when_nbdmux_healthy(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When nbdmux URL is configured and ``is_healthy`` returns True
+    at page render time, the card shows a green ``reachable`` pill
+    next to the effective URL. Lets an operator confirm the URL is
+    right without submitting a ramboot bind + getting a 502."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    monkeypatch.setattr(nbdmux_client, "is_healthy", lambda **_kw: True)
+    _login(client)
+    body = client.get("/ui/settings").text
+    # Pill markup wraps "reachable" text on the same line as the
+    # bootstrap success badge; check both for a definitive match.
+    assert "badge bg-success" in body
+    assert ">reachable\n" in body or ">reachable " in body
+    assert ">unreachable\n" not in body
+
+
+def test_ui_settings_ramboot_shows_unreachable_pill_when_nbdmux_dead(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same wiring, ``is_healthy`` returns False -> the card shows
+    the red ``unreachable`` pill. Guards against silent typos in
+    the URL setting."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    monkeypatch.setattr(nbdmux_client, "is_healthy", lambda **_kw: False)
+    _login(client)
+    body = client.get("/ui/settings").text
+    assert "badge bg-danger" in body
+    assert ">unreachable\n" in body or ">unreachable " in body
+    # The success pill's "reachable" text must NOT also appear next
+    # to a bg-success badge on this render.
+    assert ">reachable\n" not in body
+
+
+def test_ui_settings_ramboot_hides_pill_when_nbdmux_unset(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blank nbdmux URL -> no probe runs and neither pill renders.
+    Confirms the card doesn't display a red pill for the empty-config
+    baseline (which would confuse a fresh install)."""
+    monkeypatch.delenv("BTY_NBDMUX_URL", raising=False)
+    _login(client)
+    body = client.get("/ui/settings").text
+    assert ">reachable\n" not in body
+    assert ">unreachable\n" not in body
+
+
 def test_ui_settings_ramboot_persists_and_clears(client: TestClient) -> None:
     """POSTing the form persists both fields; clearing reverts."""
     _login(client)

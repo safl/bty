@@ -1676,6 +1676,21 @@ def register_ui_routes(
                 conn, _settings_store.KEY_RAMBOOT_OVERLAY_SIZE
             )
             ramboot_overlay_size_effective = _settings_store.resolve_ramboot_overlay_size(conn)
+        # Reachability probe: /healthz against the configured nbdmux
+        # URL. Bounded to 2 s so a Settings render doesn't wedge on
+        # a dead daemon. Skipped when the URL is blank -- there is
+        # nothing to probe, and rendering a red pill in that state
+        # would confuse the empty-config baseline. Result feeds a
+        # small pill next to the "Currently effective" line in the
+        # Ramboot card so the operator knows if the URL is a typo
+        # WITHOUT having to submit a ramboot bind and get the 502.
+        nbdmux_reachable: bool | None
+        if nbdmux_url_effective:
+            from nbdmux import client as nbdmux_client
+
+            nbdmux_reachable = nbdmux_client.is_healthy(server=nbdmux_url_effective, timeout=2.0)
+        else:
+            nbdmux_reachable = None
         upstream = {
             "netboot_repo": netboot_repo,
             "netboot_repo_override": netboot_repo_override,
@@ -1832,6 +1847,7 @@ def register_ui_routes(
             display_timezone_effective=display_timezone_effective,
             nbdmux_url_override=nbdmux_url_override,
             nbdmux_url_effective=nbdmux_url_effective,
+            nbdmux_reachable=nbdmux_reachable,
             ramboot_overlay_size_override=ramboot_overlay_size_override,
             ramboot_overlay_size_effective=ramboot_overlay_size_effective,
             ramboot_overlay_size_default=_settings_store.DEFAULT_RAMBOOT_OVERLAY_SIZE,
