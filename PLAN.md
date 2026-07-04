@@ -260,7 +260,7 @@ stream through the appropriate decompressor piped to `dd`
 straight to the target disk -- no temp file. `.qcow2` images are
 converted in place via ``qemu-img convert``.
 
-### Interactive PXE flash (`boot_policy=tui`)
+### Interactive PXE flash (`boot_mode=bty-tui`)
 
 The default for unknown MACs that PXE-boot through the server.
 The client lands in the live env; `bty-on-tty1.service`
@@ -273,19 +273,20 @@ the operator's image pick is NOT reported back. "bty-on-a-USB
 but over the network" -- first PXE contact lands a useful UI
 without prior server-side configuration.
 
-### Server-driven PXE flash (`boot_policy=flash`)
+### Server-driven PXE flash (`boot_mode=bty-flash-always`)
 
 1. Operator assigns `MAC -> bty_image_ref + target_disk_serial +
-   boot_policy=flash` in the web UI.
+   boot_mode=bty-flash-always` in the web UI.
 2. Target machine PXE-boots; iPXE chains into the bty live env
    over HTTP. Cmdline carries just `bty.server` + `bty.mac`.
 3. `bty-on-tty1.service` exec's `bty --server X --mac Y`.
    `bty` GETs `<server>/pxe/<mac>/plan`, sees `mode=auto` with
    the image URL + target serial filled in, flashes without
    prompts, POSTs `/pxe/{mac}/done`, reboots.
-4. Per-job CI cadences leave `boot_policy=flash` so every boot
-   reflashes; one-shot deployments use `flash-once` which
-   auto-flips to `local` on `POST /pxe/{mac}/done`.
+4. Per-job CI cadences leave `boot_mode=bty-flash-always` so every
+   boot reflashes; one-shot deployments use `bty-flash-once` which
+   settles onto the ipxe-exit chain via the `saw_flasher_boot` bit
+   after `POST /pxe/{mac}/done`.
 
 Both BIOS and UEFI clients are supported via iPXE.
 
@@ -433,7 +434,7 @@ as historical record of the build-out order.
 
 Landed after the original 1.0 list:
 
-16. **[done]** TUI-on-PXE flow - new `boot_policy=tui` (default for
+16. **[done]** TUI-on-PXE flow - new `boot_mode=bty-tui` (default for
     auto-discovered MACs), `ipxe_tui.j2` template, streaming
     `bty flash URL /dev/sdX`, `bty tui --catalog URL --mac MAC` remote
     mode, `bty-on-tty1.service` in the live env. First PXE
@@ -836,9 +837,9 @@ implementation is in flight.
   known-good environment; lab benchmarking on machines that
   have no disk or shouldn't be written to. The artifacts
   already exist (`netboot-pc` variant) and `bty-web`'s
-  per-MAC `boot_policy` field already routes to different
-  iPXE scripts; this mode would add a new policy value (e.g.
-  `boot_policy=netrun`) that renders an iPXE script that
+  per-MAC `boot_mode` field already routes to different
+  iPXE scripts; this mode would add a new mode value (e.g.
+  `boot_mode=netrun`) that renders an iPXE script that
   hands off to the kernel without scheduling a flash. The
   trickier piece is what the hand-off OS *does* on the
   network-mounted root, which is downstream of bty itself.
