@@ -1,8 +1,14 @@
-# Podman Quadlet unit -> generates bty-web.service.
-# Reference copy; operators usually consume the generated one via
-# `bty-lab init --systemd` (it bakes absolute host paths). To use this
-# file directly: replace the two *_HERE placeholders below, copy into
+# =====================================================================
+# TEMPLATE - NOT INSTALL-READY. Contains BTY_DATA_DIR_HERE and
+# BTY_TOML_HOST_PATH_HERE placeholders that will fail to bind-mount
+# if copied into /etc/containers/systemd/ verbatim.
+# =====================================================================
+#
+# Operators usually consume the generated unit via `bty-lab init
+# --systemd` (which bakes absolute host paths). To use this file
+# directly: replace the two *_HERE placeholders below, copy into
 # /etc/containers/systemd/ (root), then `systemctl daemon-reload`.
+# Podman Quadlet unit -> generates bty-web.service.
 [Unit]
 Description=bty-web
 After=network-online.target withcache.service nbdmux.service
