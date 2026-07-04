@@ -2516,23 +2516,18 @@ def create_app(
                 ) from exc
             with _db.open_db(state_path) as conn:
                 try:
-                    conn.execute(
-                        "INSERT INTO catalog_entries "
-                        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
-                        "format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            bty_image_ref,
-                            body.image_url,
-                            resolved.blob_url,
-                            sha256,
-                            name,
-                            None,
-                            fmt,
-                            size_bytes,
-                            None,
-                            now,
-                        ),
+                    _db.insert_catalog_row(
+                        conn,
+                        bty_image_ref=bty_image_ref,
+                        src=body.image_url,
+                        resolved_src=resolved.blob_url,
+                        disk_image_sha=sha256,
+                        name=name,
+                        sha_url=None,
+                        format=fmt,
+                        size_bytes=size_bytes,
+                        description=None,
+                        added_at=now,
                     )
                     _log_event(
                         conn,
@@ -2623,23 +2618,18 @@ def create_app(
             ) from exc
         with _db.open_db(state_path) as conn:
             try:
-                conn.execute(
-                    "INSERT INTO catalog_entries "
-                    "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
-                    "format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        bty_image_ref,
-                        body.image_url,
-                        body.image_url,
-                        sha256,
-                        name,
-                        body.sha_url,
-                        fmt,
-                        size_bytes,
-                        None,
-                        now,
-                    ),
+                _db.insert_catalog_row(
+                    conn,
+                    bty_image_ref=bty_image_ref,
+                    src=body.image_url,
+                    resolved_src=body.image_url,
+                    disk_image_sha=sha256,
+                    name=name,
+                    sha_url=body.sha_url,
+                    format=fmt,
+                    size_bytes=size_bytes,
+                    description=None,
+                    added_at=now,
                 )
                 _log_event(
                     conn,
@@ -2854,23 +2844,18 @@ def create_app(
                     errors.append({"name": entry.name, "error": str(exc)})
                     continue
                 try:
-                    conn.execute(
-                        "INSERT INTO catalog_entries "
-                        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
-                        "format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            bty_image_ref,
-                            entry.src,
-                            resolved_src,
-                            sha,
-                            entry.name,
-                            None,
-                            fmt,
-                            size_bytes,
-                            entry.description,
-                            now,
-                        ),
+                    _db.insert_catalog_row(
+                        conn,
+                        bty_image_ref=bty_image_ref,
+                        src=entry.src,
+                        resolved_src=resolved_src,
+                        disk_image_sha=sha,
+                        name=entry.name,
+                        sha_url=None,
+                        format=fmt,
+                        size_bytes=size_bytes,
+                        description=entry.description,
+                        added_at=now,
                     )
                     imported += 1
                 except sqlite3.IntegrityError:
