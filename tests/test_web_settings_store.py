@@ -236,6 +236,62 @@ def test_nbdmux_url_db_override_wins_over_env(
         assert _settings_store.resolve_nbdmux_url(conn) == "http://nbdmux-db:8082"
 
 
+def test_nbdmux_url_reads_cfg_from_bty_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression symmetric with the withcache-url version: on v0.42+
+    container deploys the URL lives in ``[nbdmux] url`` of bty.toml
+    and the slim compose / Quadlet no longer sets
+    ``$BTY_NBDMUX_URL``. The resolver MUST consult
+    ``cfg().nbdmux.url``, else ramboot is silently unavailable
+    despite what the operator wrote in the config file. Precedence:
+    DB override > cfg.nbdmux.url > $BTY_NBDMUX_URL > None."""
+    from bty.web import _config
+
+    monkeypatch.delenv(_settings_store.ENV_NBDMUX_URL, raising=False)
+    toml = tmp_path / "bty.toml"
+    toml.write_text('[nbdmux]\nurl = "http://from-toml:8082"\n', encoding="utf-8")
+    _config.set_active_config(_config.load_config([toml]))
+
+    with _conn(tmp_path) as conn:
+        # No DB key, no env -> cfg.nbdmux.url wins.
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://from-toml:8082"
+        # A DB override still beats bty.toml.
+        _settings_store.set_value(conn, _settings_store.KEY_NBDMUX_URL, "http://db:8082")
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://db:8082"
+
+    # Restore the empty-config default so later tests aren't polluted.
+    _config.set_active_config(_config.load_config([]))
+
+
+def test_nbdmux_url_falls_through_when_bty_toml_lacks_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-nbdmux bty.toml (loaded on upgrade before the operator
+    adds ``[nbdmux]``) has ``cfg().nbdmux`` missing entirely --
+    the resolver's ``AttributeError`` guard MUST catch this and
+    fall through to env / None rather than 500'ing a Settings-form
+    render. The comment on ``resolve_nbdmux_url`` names this
+    exact case; pin it so a refactor can't drop the guard."""
+    from bty.web import _config
+
+    monkeypatch.delenv(_settings_store.ENV_NBDMUX_URL, raising=False)
+    # An empty bty.toml has no [nbdmux] section, so cfg().nbdmux
+    # raises AttributeError on access.
+    toml = tmp_path / "bty.toml"
+    toml.write_text("# empty bty.toml\n", encoding="utf-8")
+    _config.set_active_config(_config.load_config([toml]))
+
+    with _conn(tmp_path) as conn:
+        # No env, no DB, no cfg.nbdmux.url -> None (not a crash).
+        assert _settings_store.resolve_nbdmux_url(conn) is None
+        # Env fills in if set.
+        monkeypatch.setenv(_settings_store.ENV_NBDMUX_URL, "http://env:8082")
+        assert _settings_store.resolve_nbdmux_url(conn) == "http://env:8082"
+
+    _config.set_active_config(_config.load_config([]))
+
+
 def test_ramboot_overlay_size_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Unset -> the built-in conservative default."""
     monkeypatch.delenv(_settings_store.ENV_RAMBOOT_OVERLAY_SIZE, raising=False)
@@ -244,6 +300,18 @@ def test_ramboot_overlay_size_default(tmp_path: Path, monkeypatch: pytest.Monkey
             _settings_store.resolve_ramboot_overlay_size(conn)
             == _settings_store.DEFAULT_RAMBOOT_OVERLAY_SIZE
         )
+
+
+def test_ramboot_overlay_size_env_overrides_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env-only path: no DB row, ``$BTY_RAMBOOT_OVERLAY_SIZE`` set ->
+    the env value wins over the built-in default. Fills the gap
+    between the default-only and DB-override tests (the middle
+    precedence tier had no direct coverage)."""
+    monkeypatch.setenv(_settings_store.ENV_RAMBOOT_OVERLAY_SIZE, "8G")
+    with _conn(tmp_path) as conn:
+        assert _settings_store.resolve_ramboot_overlay_size(conn) == "8G"
 
 
 def test_ramboot_overlay_size_db_override_wins(
