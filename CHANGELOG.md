@@ -9,6 +9,29 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.65.13] - 2026-07-04
+
+### Fixed
+
+Eighth pass over the trio's audit sweep, all documentation.
+`PLAN.md`'s downstream prose named `boot_policy=` (pre-v0.25.0
+field name) seven more times; now uses `boot_mode` throughout
+with the current enum values. `deploy/README.md` and
+`walkthrough-server-docker.md` asserted bty-web reads
+`$BTY_WITHCACHE_URL` from the compose file (same false claim
+Pass 4 fixed on the generated /opt/bty/README.md); both now
+describe the bind-mounted `bty.toml` auto-discovery path.
+
+Two more `stand-up` (hyphenated) CLAUDE.md-rule violations in
+deploy.py -- an operator-visible stderr line and a docstring --
+now say `setup`. One more TUI docstring called the boot-mode
+transition `sanboot`; now `ipxe-exit chain`.
+
+The top-level README grew an "Ecosystem sidecars" section
+pointing at safl/withcache + safl/nbdmux; a reader landing on
+github.com/safl/bty no longer has to click through to
+docs/src/dependencies.md to discover the sidecar architecture.
+
 ## [0.65.12] - 2026-07-04
 
 ### Fixed
