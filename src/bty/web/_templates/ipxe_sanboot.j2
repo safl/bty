@@ -7,10 +7,12 @@
 #   sanboot drive:     {{ drive }}
 #
 # This boots the local disk. It's used directly by
-# ``boot_mode=sanboot``, and also as the post-step boot for
-# ``bty-inventory`` (after disks are reported) and ``bty-flash-always``
-# (after the one-shot flash) -- so the policy is templated, not
-# hardcoded to "sanboot".
+# ``boot_mode=ipxe-exit`` (the boot-mode value renamed from
+# ``sanboot`` in v0.25.0; the underlying iPXE verb below still
+# reads ``sanboot`` on legacy BIOS), and also as the post-step
+# boot for ``bty-inventory`` (after disks are reported) and
+# ``bty-flash-always`` (after the one-shot flash) -- so the
+# policy is templated, not hardcoded.
 #
 # Firmware split (this is the important part):
 #   * UEFI -- there is NO BIOS INT13 drive map, so ``sanboot --drive``
