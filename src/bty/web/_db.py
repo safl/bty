@@ -184,11 +184,10 @@ CREATE INDEX IF NOT EXISTS machine_labels_label_idx ON machine_labels(label);
 -- ``oras://`` srcs this is the registry blob URL (e.g.
 -- ``https://ghcr.io/v2/<repo>/blobs/sha256:<digest>``) that bty-web
 -- resolves once at catalog import via ``withcache.oras.resolve_ref``;
--- everything downstream (the withcache HEAD probe, the PXE plan's
--- ``serve_url`` rewrite, the ``/images/{ref}`` proxy fallback) keys
--- on this URL so withcache stays oras-blind. NULL only for legacy
--- rows that pre-date import-time resolution (a fresh schema never
--- writes NULL).
+-- downstream consumers (the withcache HEAD probe on the check-entry
+-- endpoint, the PXE plan's ``serve_url`` rewrite) key on this URL
+-- so withcache stays oras-blind. NULL only for legacy rows that
+-- pre-date import-time resolution (a fresh schema never writes NULL).
 CREATE TABLE IF NOT EXISTS catalog_entries (
     bty_image_ref  TEXT PRIMARY KEY,
     src            TEXT NOT NULL UNIQUE,
