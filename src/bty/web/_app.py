@@ -1997,8 +1997,8 @@ def create_app(
                     detail=(
                         f"ramboot: ref {body.bty_image_ref[:8]}... is not "
                         f"registered with nbdmux at status='ready'. "
-                        f"Populate it via nbdmux's dashboard at "
-                        f"{nbdmux_url}/ (POST /exports with src_url) first."
+                        f"Click Pre-warm for this ref on /ui/images first "
+                        f"(or POST /exports directly to nbdmux at {nbdmux_url}/)."
                     ),
                 )
         with _db.open_db(state_path) as conn:

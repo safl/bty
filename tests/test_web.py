@@ -1405,6 +1405,11 @@ def test_ramboot_bind_rejected_when_ref_not_in_nbdmux(
     )
     assert r.status_code == 422
     assert "ramboot" in r.text.lower()
+    # Since v0.65.17 bty-web itself is the pre-warm entry point;
+    # the rejection message points the operator at the Pre-warm
+    # button on /ui/images rather than nbdmux's own dashboard.
+    assert "/ui/images" in r.text
+    assert "Pre-warm" in r.text
 
 
 def test_ramboot_bind_rejected_when_nbdmux_unset(
