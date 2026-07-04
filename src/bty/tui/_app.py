@@ -672,7 +672,8 @@ class BtyTui:
                 # only to (re)report its disks. Post inventory
                 # synchronously so it lands, then reboot -- the next PXE
                 # contact (saw_flasher_boot armed by the /boot fetch)
-                # sanboots the local disk. No wizard, no flash.
+                # serves the ipxe-exit chain to boot the local disk.
+                # No wizard, no flash.
                 self._console.print(
                     Panel(
                         f"Server reports [{_ACCENT}]mode=inventory[/] for "
