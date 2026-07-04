@@ -27,7 +27,7 @@ set bty-base http://{{ host }}
 # the operator with no insight into what systemd is doing.
 # The kernel + initrd URLs (iPXE-fetched) carry ``?mac={{ mac }}`` so a
 # fetch is proof this box booted the live env. ``bty-inventory`` uses
-# that to arm a one-shot sanboot of the disk on the next PXE contact
+# that to arm a one-shot ipxe-exit chain of the disk on the next PXE contact
 # (the bit is policy-gated server-side, so it's a no-op for plain
 # ``bty-tui``). The squashfs ``fetch=`` URL is DELIBERATELY NOT tagged:
 # live-boot's initramfs can't fetch a URL with a ``?mac=`` query (it
