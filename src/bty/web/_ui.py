@@ -1175,23 +1175,18 @@ def register_ui_routes(
                 )
             with _db.open_db(state_path) as conn:
                 try:
-                    conn.execute(
-                        "INSERT INTO catalog_entries "
-                        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
-                        "format, size_bytes, description, added_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            bty_image_ref,
-                            image_url,
-                            resolved.blob_url,
-                            sha256,
-                            name,
-                            None,
-                            fmt,
-                            size_bytes,
-                            None,
-                            now,
-                        ),
+                    _db.insert_catalog_row(
+                        conn,
+                        bty_image_ref=bty_image_ref,
+                        src=image_url,
+                        resolved_src=resolved.blob_url,
+                        disk_image_sha=sha256,
+                        name=name,
+                        sha_url=None,
+                        format=fmt,
+                        size_bytes=size_bytes,
+                        description=None,
+                        added_at=now,
                     )
                     _events_log.record(
                         conn,
@@ -1272,23 +1267,18 @@ def register_ui_routes(
             )
         with _db.open_db(state_path) as conn:
             try:
-                conn.execute(
-                    "INSERT INTO catalog_entries "
-                    "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
-                    "format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        bty_image_ref,
-                        image_url,
-                        image_url,
-                        sha256,
-                        name,
-                        cleaned_sha_url,
-                        fmt,
-                        size_bytes,
-                        None,
-                        now,
-                    ),
+                _db.insert_catalog_row(
+                    conn,
+                    bty_image_ref=bty_image_ref,
+                    src=image_url,
+                    resolved_src=image_url,
+                    disk_image_sha=sha256,
+                    name=name,
+                    sha_url=cleaned_sha_url,
+                    format=fmt,
+                    size_bytes=size_bytes,
+                    description=None,
+                    added_at=now,
                 )
                 _events_log.record(
                     conn,

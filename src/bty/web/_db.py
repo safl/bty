@@ -62,6 +62,58 @@ def row_value(row: sqlite3.Row, key: str, default: Any = None) -> Any:
     return row[key] if key in row.keys() else default  # noqa: SIM118
 
 
+def insert_catalog_row(
+    conn: sqlite3.Connection,
+    *,
+    bty_image_ref: str,
+    src: str,
+    resolved_src: str | None,
+    disk_image_sha: str | None,
+    name: str,
+    sha_url: str | None,
+    format: str | None,
+    size_bytes: int | None,
+    description: str | None,
+    added_at: str,
+) -> None:
+    """Insert one row into ``catalog_entries``.
+
+    Owns the 10-column INSERT + positional-argument shape so callers
+    (the JSON /catalog/entries endpoints, the /ui/catalog form
+    handlers, and the bulk-import loop) can't drift on column order
+    -- the two v0.42 bugs where an operator upload landed with
+    ``resolved_src`` and ``disk_image_sha`` swapped both came from
+    two of these tuples going out of sync.
+
+    Caller owns the transaction: does NOT commit, and does NOT
+    catch :class:`sqlite3.IntegrityError`. The four handlers vary
+    on how they surface a duplicate (303 with ``?error=`` in the
+    UI form path; HTTP 409 in the JSON API; silent
+    ``skipped += 1`` counter in the bulk-import loop), so bundling
+    the recovery in here would over-couple. Same reasoning as
+    :func:`_events_log.record` -- one write per invocation, caller
+    stitches the outer flow.
+    """
+    conn.execute(
+        "INSERT INTO catalog_entries "
+        "(bty_image_ref, src, resolved_src, disk_image_sha, name, sha_url, "
+        "format, size_bytes, description, added_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            bty_image_ref,
+            src,
+            resolved_src,
+            disk_image_sha,
+            name,
+            sha_url,
+            format,
+            size_bytes,
+            description,
+            added_at,
+        ),
+    )
+
+
 def default_state_path() -> Path:
     """Resolve ``state.db`` location from the active config
     (``cfg.paths.state_dir`` -- ``[paths] state_dir`` in bty.toml or
