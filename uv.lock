@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "bty-lab"
-version = "0.65.14"
+version = "0.65.15"
 source = { editable = "." }
 dependencies = [
     { name = "nbdmux" },
