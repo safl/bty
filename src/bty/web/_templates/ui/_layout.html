@@ -39,14 +39,14 @@
            withcache (dark-magenta) and nbdmux (magenta) so the
            trio reads as one product family from any of the
            three consoles. */
-        .bty-accent {
+        .brand-accent {
             height: 3px;
             background: linear-gradient(90deg, #0d3585 0%, #8f1b71 50%, #d63384 100%);
         }
         /* The accent + navbar + sub-nav pin to the top as one unit so
            the worker indicators and sub-nav jump links stay visible
            while scrolling. */
-        .bty-sticky-header {
+        .sticky-header {
             position: sticky;
             top: 0;
             z-index: 1030;
@@ -54,7 +54,7 @@
         /* In-page ``#anchor`` jumps (the sub-nav section links) land
            below the sticky header instead of under it. The actual
            value is updated by JS at the bottom of this template to
-           match ``.bty-sticky-header``'s measured height plus a
+           match ``.sticky-header``'s measured height plus a
            little slack -- so when the subnav grows / shrinks (e.g.
            a page-level action moves in) the jump still lands at
            the right vertical offset. The default below is a sane
@@ -490,8 +490,8 @@
 {# Sticky header: the accent strip, the main navbar, and the sub-nav
    travel together and pin to the top so the worker indicators + the
    sub-nav jump links stay reachable while scrolling a long page. #}
-<div class="bty-sticky-header">
-<div class="bty-accent"></div>
+<div class="sticky-header">
+<div class="brand-accent"></div>
 <nav class="navbar navbar-expand-md bg-dark navbar-dark py-2">
     <div class="container">
         {# Logo + ``BTY`` + version sit top-left and double as the
@@ -580,7 +580,7 @@
    The intent is "you already know what page you're on, no need
    to repeat ``Machines`` as an H1 below". #}
 {% block subnav %}{% endblock %}
-</div>{# /.bty-sticky-header #}
+</div>{# /.sticky-header #}
 
 <main class="container py-4">
     {% if flash %}
@@ -639,7 +639,7 @@
     // Measure on load + on resize so a window-shrink that wraps a
     // longer subnav onto two lines is handled too.
     function syncScrollPadding() {
-        var header = document.querySelector(".bty-sticky-header");
+        var header = document.querySelector(".sticky-header");
         if (!header) return;
         var h = header.offsetHeight + 6; // +6px slack so the target
                                          // doesn't kiss the header
