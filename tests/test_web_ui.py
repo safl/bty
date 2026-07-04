@@ -1429,7 +1429,8 @@ def test_ui_image_unwarm_calls_nbdmux_remove_export(
     from nbdmux import client as nbdmux_client
 
     monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
-    ref = _seed_https_entry(client, monkeypatch, "https://example.invalid/unwarm.img.gz")
+    src = "https://example.invalid/unwarm.img.gz"
+    ref = _seed_https_entry(client, monkeypatch, src)
 
     calls: list[dict[str, object]] = []
 
@@ -1450,6 +1451,50 @@ def test_ui_image_unwarm_calls_nbdmux_remove_export(
         cookies=AUTH,
     ).json()["events"]
     assert len(events) == 1
+    # subject_id carries the catalog src so /ui/events?subject_id=<src>
+    # correlates the removed row with prewarm.requested / .failed.
+    assert events[0]["subject_id"] == src
+
+
+def test_ui_image_prewarm_lifecycle_events_share_subject_id(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pins the subject_id convention across all three
+    ``ramboot.prewarm.*`` events: requested, failed, removed all
+    carry the src URL so ``/ui/events?subject_id=<src>`` surfaces
+    the whole lifecycle for one catalog entry. Guards against a
+    future refactor picking one key and silently drifting the
+    others."""
+    from nbdmux import client as nbdmux_client
+
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    src = "https://example.invalid/lifecycle.img.gz"
+    ref = _seed_https_entry(client, monkeypatch, src)
+
+    monkeypatch.setattr(
+        nbdmux_client,
+        "warm_export",
+        lambda *_a, **_kw: {"name": ref, "status": "queued"},
+    )
+    monkeypatch.setattr(nbdmux_client, "remove_export", lambda *_a, **_kw: None)
+
+    client.post(f"/ui/images/{ref}/prewarm", cookies=AUTH, follow_redirects=False)
+    client.post(f"/ui/images/{ref}/unwarm", cookies=AUTH, follow_redirects=False)
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise nbdmux_client.NbdmuxError("simulated 502")
+
+    monkeypatch.setattr(nbdmux_client, "warm_export", _boom)
+    client.post(f"/ui/images/{ref}/prewarm", cookies=AUTH, follow_redirects=False)
+
+    for kind in ("ramboot.prewarm.requested", "ramboot.prewarm.removed", "ramboot.prewarm.failed"):
+        rows = client.get(
+            "/events",
+            params={"subject_kind": "catalog", "kind": kind},
+            cookies=AUTH,
+        ).json()["events"]
+        assert len(rows) == 1, kind
+        assert rows[0]["subject_id"] == src, kind
 
 
 def test_ui_image_unwarm_without_nbdmux_configured_flashes_error(

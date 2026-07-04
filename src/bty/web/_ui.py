@@ -1433,10 +1433,22 @@ def register_ui_routes(
         Idempotent: nbdmux returns 404 for an unknown export name,
         which :func:`nbdmux.client.remove_export` treats as no-op.
         Only transport / server failures surface as ``?error=``.
+
+        The audit event carries ``subject_id=<catalog src>`` to
+        stay symmetric with ``ramboot.prewarm.requested`` /
+        ``.failed`` so a /ui/events filter on one src URL surfaces
+        the full lifecycle; the src is looked up from
+        ``catalog_entries`` when the row still exists (a
+        prior-DELETE leaves the row gone, in which case the event
+        falls back to the ref so the audit trail still lands).
         """
         from nbdmux import client as nbdmux_client
 
         with _db.open_db(state_path) as conn:
+            row = conn.execute(
+                "SELECT src FROM catalog_entries WHERE bty_image_ref = ?", (ref,)
+            ).fetchone()
+            src_for_audit = row["src"] if row is not None else ref
             nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
         if not nbdmux_url:
             return RedirectResponse(
@@ -1456,10 +1468,10 @@ def register_ui_routes(
                 kind="ramboot.prewarm.removed",
                 summary=f"prewarm removed: {ref}",
                 subject_kind="catalog",
-                subject_id=ref,
+                subject_id=src_for_audit,
                 actor="operator",
                 source_ip=_client_ip(request),
-                details={"ref": ref},
+                details={"ref": ref, "src": src_for_audit},
             )
             conn.commit()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
