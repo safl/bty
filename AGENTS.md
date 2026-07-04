@@ -22,9 +22,11 @@ user-facing [documentation](docs/).
   - `bty --version` prints `bty <version>` and exits 0.
   - `bty --help` documents the surface.
 - The **Python API** exposed by `bty` (`bty.disks`, `bty.images`,
-  `bty.flash`, `bty.catalog`, `bty.oras`) is stable within a given
+  `bty.flash`, `bty.catalog`) is stable within a given
   `bty.__version__` minor release. Use these for in-process
-  scripting if the HTTP API doesn't fit your use case.
+  scripting if the HTTP API doesn't fit your use case. The
+  oras / OCI helpers live in `withcache.oras` (they moved out of
+  bty in v0.59.0 when withcache took over the OCI dance).
 - Internal modules (anything starting with `_`, e.g. `bty.tui._app`,
   `bty.web._app`) are not stable and may change without notice.
 
@@ -145,7 +147,7 @@ versioned URL prefix (`/v2/...`). Agents key off field names.
 ## Boot mode
 
 Each machine carries a `boot_mode` (renamed from `boot_policy`
-in v0.23.0). The mode is the operator's intent and is never
+in v0.25.0). The mode is the operator's intent and is never
 mutated by the server; the transient post-flash state lives in
 the `saw_flasher_boot` bit instead (see the mode/state split
 introduced in v0.25.0).
