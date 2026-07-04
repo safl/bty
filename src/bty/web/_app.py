@@ -133,6 +133,71 @@ def invalidate_display_tz_cache(state_path: Path) -> None:
     _DISPLAY_TZ_CACHE.pop(str(state_path), None)
 
 
+def _boot_state(m: Any) -> str:
+    """Lifecycle state for a machine -- the 'where in the cycle' half
+    of the mode/state model. Empty for the non-alternating modes
+    (ipxe-exit, bty-tui). The mode is the operator's intent; this
+    is the transient position within it.
+
+    Two signals feed the state:
+
+    - ``saw_flasher_boot`` -- the bit armed when the box fetched a
+      ``/boot`` artifact. Proves the iPXE chain ran, NOT that the
+      live env actually reached ``bty`` and reported back.
+    - ``known_disks_at`` / ``last_flashed_at`` -- the canonical
+      completion signal for the mode (inventory POSTed / flash
+      /done POSTed). Set ONLY by the live env on success.
+
+    Pre-v0.33.22: state derived only from ``saw_flasher_boot``, so
+    "inventoried; booting disk" / "flashed; booting disk" lit up
+    the moment iPXE pulled the kernel -- BEFORE the live env had
+    a chance to run, let alone report back. Operator-visible
+    symptom: machine shows "inventoried" within seconds of
+    discovery, well before the box could have actually inventoried.
+    Fixed by gating the "done" labels on the matching completion
+    signal AND surfacing a distinct "live env in progress" label
+    for the in-between state.
+
+    ``m`` is ``Any`` because Jinja can pass us a ``sqlite3.Row``,
+    a plain dict, or a Pydantic dataclass depending on the call
+    site -- they all index by string key.
+    """
+    try:
+        mode = m["boot_mode"]
+        armed = bool(m["saw_flasher_boot"])
+    except (KeyError, TypeError, IndexError):
+        return ""
+
+    # Safe lookups for the completion signals -- some call sites
+    # (e.g. mid-discovery rows surfacing on /events) might lack
+    # these columns yet. Treat absent as "no signal".
+    def _has(key: str) -> bool:
+        try:
+            return bool(m[key])
+        except (KeyError, TypeError, IndexError):
+            return False
+
+    if mode == "bty-flash-once":
+        if armed and _has("last_flashed_at"):
+            return "flashed; booting disk"
+        if armed:
+            return "live env running; awaiting flash"
+        return "pending flash"
+    if mode == "bty-flash-always":
+        if armed and _has("last_flashed_at"):
+            return "flashed; booting disk"
+        if armed:
+            return "live env running; awaiting flash"
+        return "ready to flash"
+    if mode == "bty-inventory":
+        if armed and _has("known_disks_at"):
+            return "inventoried; booting disk"
+        if armed:
+            return "live env running; awaiting inventory"
+        return "pending inventory"
+    return ""
+
+
 def create_app(
     *,
     state_path: Path,
@@ -407,70 +472,6 @@ def create_app(
         return Markup("".join(out))
 
     jinja.filters["linkify"] = _linkify
-
-    def _boot_state(m: Any) -> str:
-        """Lifecycle state for a machine -- the 'where in the cycle' half
-        of the mode/state model. Empty for the non-alternating modes
-        (ipxe-exit, bty-tui). The mode is the operator's intent; this
-        is the transient position within it.
-
-        Two signals feed the state:
-
-        - ``saw_flasher_boot`` -- the bit armed when the box fetched a
-          ``/boot`` artifact. Proves the iPXE chain ran, NOT that the
-          live env actually reached ``bty`` and reported back.
-        - ``known_disks_at`` / ``last_flashed_at`` -- the canonical
-          completion signal for the mode (inventory POSTed / flash
-          /done POSTed). Set ONLY by the live env on success.
-
-        Pre-v0.33.22: state derived only from ``saw_flasher_boot``, so
-        "inventoried; booting disk" / "flashed; booting disk" lit up
-        the moment iPXE pulled the kernel -- BEFORE the live env had
-        a chance to run, let alone report back. Operator-visible
-        symptom: machine shows "inventoried" within seconds of
-        discovery, well before the box could have actually inventoried.
-        Fixed by gating the "done" labels on the matching completion
-        signal AND surfacing a distinct "live env in progress" label
-        for the in-between state.
-
-        ``m`` is ``Any`` because Jinja can pass us a ``sqlite3.Row``,
-        a plain dict, or a Pydantic dataclass depending on the call
-        site -- they all index by string key.
-        """
-        try:
-            mode = m["boot_mode"]
-            armed = bool(m["saw_flasher_boot"])
-        except (KeyError, TypeError, IndexError):
-            return ""
-
-        # Safe lookups for the completion signals -- some call sites
-        # (e.g. mid-discovery rows surfacing on /events) might lack
-        # these columns yet. Treat absent as "no signal".
-        def _has(key: str) -> bool:
-            try:
-                return bool(m[key])
-            except (KeyError, TypeError, IndexError):
-                return False
-
-        if mode == "bty-flash-once":
-            if armed and _has("last_flashed_at"):
-                return "flashed; booting disk"
-            if armed:
-                return "live env running; awaiting flash"
-            return "pending flash"
-        if mode == "bty-flash-always":
-            if armed and _has("last_flashed_at"):
-                return "flashed; booting disk"
-            if armed:
-                return "live env running; awaiting flash"
-            return "ready to flash"
-        if mode == "bty-inventory":
-            if armed and _has("known_disks_at"):
-                return "inventoried; booting disk"
-            if armed:
-                return "live env running; awaiting inventory"
-            return "pending inventory"
-        return ""
 
     jinja.filters["boot_state"] = _boot_state
 
