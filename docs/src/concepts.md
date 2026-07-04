@@ -76,7 +76,7 @@ the disk list (from `lsblk`, the flasher's target-disk source) and the full
 hardware tree is supplementary (shown on the Machine view and downloadable
 raw), so a bty fleet doubles as a passive hardware inventory. The
 `bty-inventory` policy keeps that data fresh on boxes that otherwise just
-sanboot.
+run the `ipxe-exit` chain to boot the disk.
 
 ## Boot mode
 
