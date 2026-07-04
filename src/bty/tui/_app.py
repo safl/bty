@@ -527,7 +527,7 @@ class BtyTui:
             - ``plan.mode == "interactive"`` -> interactive wizard with
               the catalog the server suggests
             - ``plan.mode == "inventory"`` -> post disk inventory, then
-              reboot (boot_mode=bty-inventory; next contact sanboots)
+              reboot (boot_mode=bty-inventory; next contact serves the ipxe-exit chain)
             - ``plan.mode == "exit"``    -> exit cleanly (nothing to do
               from bty's side; firmware sanboot handles the rest)
             - 404 / network failure       -> interactive wizard with
