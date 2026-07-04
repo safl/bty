@@ -157,7 +157,7 @@ to end. Most operators never run this build pipeline themselves -
 
 ## Running bty-web
 
-The supported way to stand up a long-running bty-web is the
+The supported way to set up a long-running bty-web is the
 container deploy (`deploy/compose.yml` / `deploy/quadlet/`); see
 [`deploy/README.md`](../deploy/README.md) and
 [walkthrough-server-docker.md](../docs/src/walkthrough-server-docker.md).

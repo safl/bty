@@ -94,7 +94,7 @@ STATIC_DIR = Path(__file__).parent / "_static"
 
 # Per-state_path display-timezone cache. The TZ rarely changes across
 # a bty-web process lifetime so a single DB read per process (per
-# state.db, in case tests stand up multiple) is enough. The Settings
+# state.db, in case tests set up multiple) is enough. The Settings
 # POST handler invalidates by calling :func:`invalidate_display_tz_cache`
 # after a successful write so the next render picks up the new value.
 _DISPLAY_TZ_CACHE: dict[str, Any] = {}  # str(state_path) -> ZoneInfo

@@ -203,7 +203,7 @@ to `queued` and the worker restarts the pipeline.
 | Operator wants the disk reimaged for a tenant | flash-once |
 | Per-job CI cadence with disk persistence | flash-always |
 | "Just run this in RAM for an hour" | ramboot |
-| Boot the existing disk, change nothing | ipxe-exit (sanboot) |
+| Boot the existing disk, change nothing | ipxe-exit (iPXE sanboot verb on BIOS / firmware exit on UEFI) |
 
 ramboot does not write to disk; flash does. Pick on the durability
 question, not the speed question. (The first ramboot of a given
