@@ -5,13 +5,16 @@ UI, the per-MAC PXE plans, the iPXE bootfiles, and the image bytes. The
 operator's existing LAN DHCP server points PXE clients at this host; targets
 PXE-boot into the server's catalog, flash themselves, reboot.
 
-Run `bty-web` as a container. The deploy ships three pieces:
+Run `bty-web` as a container. The deploy ships four pieces:
 
 1. **bty-web** (`ghcr.io/safl/bty-web`) -- the policy / PXE layer: UI, PXE
    plans, boot artifacts, and images over HTTP on `:8080`.
 2. **withcache** (`ghcr.io/safl/withcache`) -- a URL-keyed artifact cache that
    holds the image bytes, so a fleet pulls each image once.
-3. **tftp** (`ghcr.io/safl/bty-tftp`, optional) -- a small TFTP sidecar that
+3. **nbdmux** (`ghcr.io/safl/nbdmux`) -- HTTP-controlled NBD export
+   multiplexer that serves `boot_mode=ramboot` targets over NBD on
+   `:10809`; bty polls its export status via `:8082`.
+4. **tftp** (`ghcr.io/safl/bty-tftp`, optional) -- a small TFTP sidecar that
    serves the ~1 MB iPXE bootfile for legacy BIOS / older UEFI clients that
    bootstrap over TFTP. It serves only the bootfile; the kernel / initrd /
    squashfs come from bty-web over HTTP.
