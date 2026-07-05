@@ -67,8 +67,6 @@ from bty.web._events import (
     sse_format,
     worker_event,
 )
-from bty.web._events_log import acknowledge_event as _acknowledge_event
-from bty.web._events_log import list_events as _list_events
 from bty.web._events_log import record as _log_event
 from bty.web._helpers import (
     CATALOG_UPLOAD_MAX_BYTES,
@@ -85,6 +83,7 @@ from bty.web._helpers import (
 from bty.web._reqctx import client_ip as _client_ip
 from bty.web._reqctx import normalise_mac as _normalise_mac
 from bty.web._routes_backups import register_backup_routes
+from bty.web._routes_events import register_event_routes
 from bty.web._routes_releases import register_release_routes
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
@@ -1394,50 +1393,10 @@ def create_app(
         state_path=state_path,
     )
 
-    # ---------- event log ---------------------------------------
     # Slim audit log of operator + machine activity. Backs the
     # /ui/events page + per-subject embedded lists on
     # /ui/machines/{mac} and /ui/images.
-
-    @app.get("/events", dependencies=[Depends(require_auth)])
-    def list_events_endpoint(
-        kind: str | None = None,
-        subject_kind: str | None = None,
-        subject_id: str | None = None,
-        actor: str | None = None,
-        source_ip: str | None = None,
-        failed: str | None = None,
-        before_id: int | None = None,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        with _db.open_db(state_path) as conn:
-            events = _list_events(
-                conn,
-                kind=kind,
-                subject_kind=subject_kind,
-                subject_id=subject_id,
-                actor=actor,
-                source_ip=source_ip,
-                failed_only=bool(failed),
-                before_id=before_id,
-                limit=limit,
-            )
-        return {"events": [e.to_dict() for e in events]}
-
-    @app.post("/events/{event_id}/ack", dependencies=[Depends(require_auth)])
-    def acknowledge_event_endpoint(event_id: int) -> dict[str, Any]:
-        """Mark one event acknowledged. Clears it from the dashboard
-        Health Monitoring tripwire (which counts only unacknowledged
-        failures) without deleting the audit row. 404 if no such id."""
-        with _db.open_db(state_path) as conn:
-            changed = _acknowledge_event(conn, event_id)
-            conn.commit()
-        if not changed:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"no event with id {event_id}",
-            )
-        return {"id": event_id, "acknowledged": True}
+    register_event_routes(app, state_path=state_path)
 
     def _arm_flasher_boot(raw_mac: str, client_ip: str | None) -> None:
         """Mark that ``raw_mac`` fetched a live-env artifact -- proof it
