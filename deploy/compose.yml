@@ -77,6 +77,13 @@ services:
       - "8080:8080"
     environment:
       BTY_CONFIG_FILE: /etc/bty/bty.toml
+      # nbdmux.client reads this on write endpoints (add_export,
+      # warm_export, remove_export) and sends it as
+      # ``Authorization: Bearer <pw>`` so the JSON control plane
+      # accepts service-to-service calls without a session cookie.
+      # Nbdmux's own daemon reads the same env var to compare;
+      # sharing the value ties both ends of the channel.
+      NBDMUX_ADMIN_PASSWORD: ${NBDMUX_ADMIN_PASSWORD:?set in envvars}
     volumes:
       - ${BTY_HOST_DATA_DIR:-./data}/bty:/var/lib/bty
       # RW (no :ro) so Settings-page edits land back on the host file,

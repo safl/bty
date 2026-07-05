@@ -84,7 +84,7 @@ requires-dist = [
     { name = "itsdangerous", marker = "extra == 'web'", specifier = ">=2.1" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1" },
-    { name = "nbdmux", specifier = ">=0.2.19,<0.3" },
+    { name = "nbdmux", specifier = ">=0.3.1,<0.4" },
     { name = "python-multipart", marker = "extra == 'all'", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.9" },
     { name = "rich", marker = "extra == 'all'", specifier = ">=13" },
@@ -492,11 +492,18 @@ wheels = [
 
 [[package]]
 name = "nbdmux"
-version = "0.2.19"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f5/52/6f53ecb7178be789223f96b94bfa6a1a683bc6a88b0b5c16e179d51133f8/nbdmux-0.2.19.tar.gz", hash = "sha256:ec61b62dc8672baab6f9f68a73a400746d53aba94aaeb06f871797959b672954", size = 425315, upload-time = "2026-07-04T15:48:19.944Z" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "itsdangerous" },
+    { name = "jinja2" },
+    { name = "python-multipart" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/b1/8ba15bb7ec645f23de0313b4f4b03204bcb1852af3be09b8aa9f81935d72/nbdmux-0.3.1.tar.gz", hash = "sha256:4470acaba5b61a8881c2b36e4e8d2e3afc55718673b551d343b01ff04473506a", size = 503474, upload-time = "2026-07-05T22:21:25.119Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/fb/cd31f9f2713142051735e2851c005ce0e35a4e224c489650b29d11a86c14/nbdmux-0.2.19-py3-none-any.whl", hash = "sha256:933ee1ec921f64abe43cc9a1a71460f6bda674edd30491a10c94dfaf1cd6beab", size = 406954, upload-time = "2026-07-04T15:48:18.451Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/1f/5f7cd97c2a7841b2a871919ea88736df3f3675d8f4726360d1cbcfb2f4f0/nbdmux-0.3.1-py3-none-any.whl", hash = "sha256:baf56d6078cb35c8a722c6e70e3a6d1922991bd1f511cf52c75a98f21740e3b5", size = 419980, upload-time = "2026-07-05T22:21:23.665Z" },
 ]
 
 [[package]]
