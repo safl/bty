@@ -118,11 +118,14 @@ def test_delete_catalog_endpoints_have_ui_surface() -> None:
     no UI button -- operators had to curl from the shell.
 
     Heuristic: every ``@app.delete("/catalog/...")`` route in
-    bty-web's _app.py must have at least one corresponding action
-    in the JS handler in ``images.html`` (fetch with method DELETE
-    targeting the same path prefix).
+    bty-web's ``_app.py`` OR any ``_routes_*.py`` sibling must have
+    at least one corresponding action in the JS handler in
+    ``images.html`` (fetch with method DELETE targeting the same
+    path prefix).
     """
-    src = (REPO_ROOT / "src" / "bty" / "web" / "_app.py").read_text()
+    web_dir = REPO_ROOT / "src" / "bty" / "web"
+    src_files = [web_dir / "_app.py", *sorted(web_dir.glob("_routes_*.py"))]
+    src = "\n".join(p.read_text() for p in src_files)
     template = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui" / "images.html").read_text()
 
     # Collect @app.delete("/catalog/...") paths.
@@ -135,7 +138,7 @@ def test_delete_catalog_endpoints_have_ui_surface() -> None:
         prefix = re.sub(r"/\{[^}]+\}", "/", path).rstrip("/")
         delete_paths.append(prefix)
 
-    assert delete_paths, "no @app.delete /catalog/* routes found in _app.py"
+    assert delete_paths, "no @app.delete /catalog/* routes found in _app.py or _routes_*.py"
 
     missing = []
     for prefix in delete_paths:
