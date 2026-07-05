@@ -94,11 +94,11 @@ def test_bty_web_main_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert bty.__version__ in out
 
 
-def test_resolve_secret_key_cfg_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_resolve_secret_cfg_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A configured ``cfg.server.session_secret`` (via bty.toml or
     its env override ``BTY_SERVER_SESSION_SECRET``) takes precedence
     over any on-disk file."""
-    from bty.web import _config, _resolve_secret_key
+    from bty.web import _config, resolve_secret
 
     secret_file = tmp_path / "session-secret"
     secret_file.write_text("from-disk\n", encoding="utf-8")
@@ -106,58 +106,56 @@ def test_resolve_secret_key_cfg_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     # Re-load the active config so the env override above takes effect.
     _config.set_active_config(_config.load_config([]))
 
-    assert _resolve_secret_key(tmp_path) == "from-cfg"
+    assert resolve_secret(tmp_path) == "from-cfg"
 
 
-def test_resolve_secret_key_reads_existing_file(tmp_path: Path) -> None:
+def test_resolve_secret_reads_existing_file(tmp_path: Path) -> None:
     """Without env override, the persisted secret is reused so
     bty-web survives a restart without invalidating
     every operator's session cookie. The autouse conftest fixture
     installs an env-free default Config, so ``cfg.server.session_secret``
     is empty and the function falls through to the disk file."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     secret_file = tmp_path / "session-secret"
     # Trailing whitespace must be stripped -- the secret is written
     # as ``key + "\n"`` so file-round-trip cycles add one.
     secret_file.write_text("persisted-key\n", encoding="utf-8")
 
-    assert _resolve_secret_key(tmp_path) == "persisted-key"
+    assert resolve_secret(tmp_path) == "persisted-key"
 
 
-def test_resolve_secret_key_generates_and_persists(tmp_path: Path) -> None:
+def test_resolve_secret_generates_and_persists(tmp_path: Path) -> None:
     """Fresh ``state_dir`` (no cfg override, no file): generate a key,
     write it with mode 0640, return it. Second call must read
     the same value back (idempotent across restarts)."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     fresh = tmp_path / "new-state"
     assert not fresh.exists()
 
-    first = _resolve_secret_key(fresh)
+    first = resolve_secret(fresh)
     assert first  # non-empty
     secret_file = fresh / "session-secret"
     assert secret_file.exists()
     assert secret_file.stat().st_mode & 0o777 == 0o640
 
-    second = _resolve_secret_key(fresh)
+    second = resolve_secret(fresh)
     assert second == first
 
 
-def test_resolve_secret_key_rejects_empty_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resolve_secret_rejects_empty_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """REGRESSION (v0.33.8): an empty ``BTY_SERVER_SESSION_SECRET`` env var
     must be treated as unset, falling through to file / generation.
     SessionMiddleware silently accepts an empty HMAC key, which
     makes the resulting session cookies forgeable by anyone on the
     LAN segment -- so we never let one through, no matter where the
     empty value came from."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     monkeypatch.setenv("BTY_SERVER_SESSION_SECRET", "")
     fresh = tmp_path / "new-state"
-    key = _resolve_secret_key(fresh)
+    key = resolve_secret(fresh)
     assert key  # generated, non-empty
     assert key != "", "empty env must NOT pass through"
     # And the on-disk file must carry the generated key, not be empty.
@@ -165,35 +163,33 @@ def test_resolve_secret_key_rejects_empty_env(
     assert persisted == key
 
 
-def test_resolve_secret_key_rejects_whitespace_env(
+def test_resolve_secret_rejects_whitespace_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Whitespace-only env values are treated as empty (same risk
     profile as an actual empty string -- ``.strip()`` returns
     empty, SessionMiddleware would accept it)."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     monkeypatch.setenv("BTY_SERVER_SESSION_SECRET", "   \n\t  ")
     fresh = tmp_path / "new-state"
-    key = _resolve_secret_key(fresh)
+    key = resolve_secret(fresh)
     assert key.strip() != ""
 
 
-def test_resolve_secret_key_rejects_empty_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resolve_secret_rejects_empty_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """REGRESSION (v0.33.8): an empty session-secret file (a
     half-written file from a crashed first boot, an operator
     ``touch``, ...) must NOT be used as the HMAC key. Same forgeable-
     cookie risk as the empty-env case. The function must regenerate
     + atomically rewrite, leaving a NON-empty file behind."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     monkeypatch.delenv("BTY_SERVER_SESSION_SECRET", raising=False)
     secret_file = tmp_path / "session-secret"
     secret_file.write_text("", encoding="utf-8")
 
-    key = _resolve_secret_key(tmp_path)
+    key = resolve_secret(tmp_path)
     assert key  # non-empty
     # The empty file was replaced with the generated key.
     persisted = secret_file.read_text(encoding="utf-8").strip()
@@ -201,34 +197,32 @@ def test_resolve_secret_key_rejects_empty_file(
     assert persisted != ""
 
 
-def test_resolve_secret_key_rejects_whitespace_file(
+def test_resolve_secret_rejects_whitespace_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A file containing only whitespace is functionally empty for
     HMAC purposes; treat it as missing and regenerate."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     monkeypatch.delenv("BTY_SERVER_SESSION_SECRET", raising=False)
     secret_file = tmp_path / "session-secret"
     secret_file.write_text("\n\n   \t\n", encoding="utf-8")
 
-    key = _resolve_secret_key(tmp_path)
+    key = resolve_secret(tmp_path)
     assert key.strip() != ""
     assert key == secret_file.read_text(encoding="utf-8").strip()
 
 
-def test_resolve_secret_key_persist_is_atomic(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resolve_secret_persist_is_atomic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The generate-and-persist path must write through a same-dir
     tempfile + rename so a crash mid-write can't leave a truncated
     secret on disk. We can't easily inject a crash; instead we
     assert no ``.tmp`` debris is left after a successful generate."""
-    from bty.web import _resolve_secret_key
+    from bty.web import resolve_secret
 
     monkeypatch.delenv("BTY_SERVER_SESSION_SECRET", raising=False)
     fresh = tmp_path / "new-state"
-    _resolve_secret_key(fresh)
+    resolve_secret(fresh)
 
     leftovers = [p for p in fresh.iterdir() if p.name.endswith(".tmp")]
     assert not leftovers, f"atomic-write tempfiles must not be left behind: {leftovers!r}"
