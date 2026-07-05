@@ -5417,7 +5417,7 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
 
 
 # --------------------------------------------------------------------------
-# _safe_path: direct unit tests for the path-traversal guard
+# safe_path: direct unit tests for the path-traversal guard
 # --------------------------------------------------------------------------
 #
 # The HTTP layer's helper that resolves ``root / name`` and refuses
@@ -5429,9 +5429,9 @@ def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_pa
 
 def test_safe_path_accepts_plain_name(tmp_path: Path) -> None:
     """A bare filename returns ``root / name`` resolved."""
-    from bty.web._app import _safe_path
+    from bty.web._helpers import safe_path
 
-    result = _safe_path(tmp_path, "image.img.gz")
+    result = safe_path(tmp_path, "image.img.gz")
     assert result == (tmp_path / "image.img.gz").resolve()
 
 
@@ -5455,10 +5455,10 @@ def test_safe_path_rejects_traversal_inputs(tmp_path: Path, bad: str) -> None:
     upload-endpoint test failure."""
     from fastapi import HTTPException
 
-    from bty.web._app import _safe_path
+    from bty.web._helpers import safe_path
 
     with pytest.raises(HTTPException) as excinfo:
-        _safe_path(tmp_path, bad)
+        safe_path(tmp_path, bad)
     assert excinfo.value.status_code == 400
     # Detail names the offending input + the constraint (was a terse
     # "bad name"). Both reject paths start "invalid name <repr>:".
@@ -5473,7 +5473,7 @@ def test_safe_path_rejects_symlink_escape(tmp_path: Path) -> None:
     syntactic check misses."""
     from fastapi import HTTPException
 
-    from bty.web._app import _safe_path
+    from bty.web._helpers import safe_path
 
     outside = tmp_path.parent / "elsewhere"
     outside.mkdir(exist_ok=True)
@@ -5483,7 +5483,7 @@ def test_safe_path_rejects_symlink_escape(tmp_path: Path) -> None:
     (root / "innocent").symlink_to(outside / "target.txt")
 
     with pytest.raises(HTTPException) as excinfo:
-        _safe_path(root, "innocent")
+        safe_path(root, "innocent")
     assert excinfo.value.status_code == 400
 
 
@@ -5493,7 +5493,7 @@ def test_seed_boot_dir_copies_baked_artifact(
     """The container bakes its custom ipxe.efi under BTY_BOOT_SEED_DIR;
     startup copies it into an empty boot_root so GET /boot/ipxe.efi works
     out of the box."""
-    from bty.web._app import _seed_boot_dir
+    from bty.web._helpers import seed_boot_dir
 
     seed = tmp_path / "seed"
     seed.mkdir()
@@ -5501,7 +5501,7 @@ def test_seed_boot_dir_copies_baked_artifact(
     boot = tmp_path / "boot"
 
     monkeypatch.setenv("BTY_BOOT_SEED_DIR", str(seed))
-    _seed_boot_dir(boot)
+    seed_boot_dir(boot)
     assert (boot / "ipxe.efi").read_bytes() == b"BAKED"
 
 
@@ -5510,7 +5510,7 @@ def test_seed_boot_dir_skips_dotfile_placeholder(
 ) -> None:
     """A .gitkeep placeholder in an otherwise-empty seed dir (dev builds)
     is not published into boot_root."""
-    from bty.web._app import _seed_boot_dir
+    from bty.web._helpers import seed_boot_dir
 
     seed = tmp_path / "seed"
     seed.mkdir()
@@ -5518,7 +5518,7 @@ def test_seed_boot_dir_skips_dotfile_placeholder(
     boot = tmp_path / "boot"
 
     monkeypatch.setenv("BTY_BOOT_SEED_DIR", str(seed))
-    _seed_boot_dir(boot)
+    seed_boot_dir(boot)
     assert not (boot / ".gitkeep").exists()
 
 
@@ -5526,7 +5526,7 @@ def test_seed_boot_dir_never_overwrites_operator_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An operator-placed bootfile in boot_root always wins over the baked one."""
-    from bty.web._app import _seed_boot_dir
+    from bty.web._helpers import seed_boot_dir
 
     seed = tmp_path / "seed"
     seed.mkdir()
@@ -5536,16 +5536,16 @@ def test_seed_boot_dir_never_overwrites_operator_file(
     (boot / "ipxe.efi").write_bytes(b"OPERATOR")
 
     monkeypatch.setenv("BTY_BOOT_SEED_DIR", str(seed))
-    _seed_boot_dir(boot)
+    seed_boot_dir(boot)
     assert (boot / "ipxe.efi").read_bytes() == b"OPERATOR"
 
 
 def test_seed_boot_dir_noop_when_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Host / dev installs leave BTY_BOOT_SEED_DIR unset; seeding is a no-op
     and does not create boot_root."""
-    from bty.web._app import _seed_boot_dir
+    from bty.web._helpers import seed_boot_dir
 
     monkeypatch.delenv("BTY_BOOT_SEED_DIR", raising=False)
     boot = tmp_path / "boot"
-    _seed_boot_dir(boot)
+    seed_boot_dir(boot)
     assert not boot.exists()

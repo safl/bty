@@ -1123,7 +1123,7 @@ def register_ui_routes(
         from withcache import oras as _oras
 
         from bty import catalog as _catalog
-        from bty.web._app import _head_content_length  # local import: avoid cycle at module load
+        from bty.web._helpers import head_content_length
 
         cleaned_sha_url = sha_url.strip() or None
         # Apply the same Pydantic validation the JSON API uses
@@ -1256,7 +1256,7 @@ def register_ui_routes(
                 )
 
         fmt = bty_images.detect_format(Path(name))
-        size_bytes = _head_content_length(image_url)
+        size_bytes = head_content_length(image_url)
         now = _now_iso()
         try:
             bty_image_ref = _catalog.image_ref_for_src(image_url)
