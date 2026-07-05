@@ -3,30 +3,93 @@
 Registers ``POST /catalog/entries`` (add-by-URL),
 ``GET /catalog/entries`` (list), ``DELETE /catalog/entries``
 (delete by src), and ``POST /catalog/import`` (bulk-import from a
-TOML manifest).
+TOML manifest) via :func:`register_catalog_routes`.
 
-Also exposes :func:`import_parsed_catalog` -- the DB-insert helper
-that the ``/ui/catalog/upload`` and ``/ui/catalog/fetch-release``
-form handlers in ``_app.py`` also call.
+Also registers the two catalog-manifest form endpoints
+(``POST /ui/catalog/upload``, ``POST /ui/catalog/fetch-release``)
+via :func:`register_catalog_upload_routes`, plus exposes the
+shared :func:`import_parsed_catalog` and
+:func:`auto_import_manifest_rows` helpers -- the app-lifespan
+hook calls the latter directly to seed operator-curated rows on
+startup.
 """
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+import urllib.error
 import urllib.parse
+import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
+from starlette.datastructures import UploadFile
 from withcache import oras as _oras
 
 from bty import catalog as _catalog
 from bty import images
-from bty.web import _db, _models
+from bty.web import _db, _models, _settings_store
 from bty.web._auth import require_auth
 from bty.web._events_log import record as _log_event
-from bty.web._helpers import head_content_length, now_iso
+from bty.web._helpers import CATALOG_UPLOAD_MAX_BYTES, head_content_length, now_iso
 from bty.web._reqctx import client_ip as _client_ip
+
+
+class _CatalogStateHolder(Protocol):
+    """Structural interface for the ``catalog_state`` container the
+    app factory hands us. Mutable ``.catalog`` attribute -- the
+    reload path swaps it in-place so every closure-captured handler
+    sees the new value on the next call."""
+
+    catalog: _catalog.Catalog | None
+
+
+def auto_import_manifest_rows(catalog: _catalog.Catalog, *, state_path: Path) -> None:
+    """Insert a ``catalog_entries`` row for every manifest entry
+    that doesn't already have one.
+
+    Without this, an operator who uploads a ``catalog.toml`` via
+    /ui/catalog/upload sees the entries on /ui/images (the merge
+    renders them) but the /ui/machines/{mac} "Image" dropdown
+    stays empty for those entries -- the dropdown queries
+    ``catalog_entries`` only. Auto-importing on reload keeps the
+    two views consistent: an upload makes the entries bindable
+    without an extra ``POST /catalog/import`` round-trip.
+
+    ``INSERT OR IGNORE`` -- operator-curated rows (added via
+    the URL form or a prior ``/catalog/import``) for the same
+    src are preserved with their original description / sha_url
+    intact.
+    """
+    now = now_iso()
+    with _db.open_db(state_path) as conn:
+        for entry in catalog.entries:
+            try:
+                ref = _catalog.image_ref_for_src(entry.src)
+            except ValueError:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO catalog_entries "
+                "(bty_image_ref, src, disk_image_sha, name, sha_url, "
+                "format, size_bytes, description, added_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ref,
+                    entry.src,
+                    entry.sha256,
+                    entry.name,
+                    None,
+                    entry.format,
+                    entry.size_bytes,
+                    entry.description,
+                    now,
+                ),
+            )
+        conn.commit()
 
 
 def import_parsed_catalog(
@@ -501,3 +564,204 @@ def register_catalog_routes(app: FastAPI, *, state_path: Path) -> None:
             "skipped": skipped,
             "errors": errors,
         }
+
+
+def register_catalog_upload_routes(
+    app: FastAPI,
+    *,
+    state_path: Path,
+    manifest_path: Path,
+    catalog_state: _CatalogStateHolder,
+    publish_state_changed: Callable[[], None],
+) -> None:
+    """Attach ``POST /ui/catalog/upload`` + ``POST /ui/catalog/fetch-release``
+    to ``app``. Authenticated endpoints; only operators logged into
+    the bty-web UI can enqueue catalog reloads."""
+
+    async def _reload_catalog_from_disk() -> None:
+        """Re-read ``manifest_path`` and refresh the in-process catalog.
+
+        Called after a manifest write (UI upload or release fetch).
+        Raises :class:`_catalog.CatalogError` on parse failure -- the
+        caller wraps it into an HTTP 400 + flash error so the
+        operator sees what's wrong rather than getting a silent
+        no-op.
+
+        Auto-imports the parsed entries into ``catalog_entries``
+        as a side-effect so the /ui/machines/{mac} dropdown
+        becomes populated without a separate ``POST /catalog/import``
+        step. Idempotent (``INSERT OR IGNORE``).
+        """
+        new_catalog = _catalog.load(manifest_path)
+        catalog_state.catalog = new_catalog
+        auto_import_manifest_rows(new_catalog, state_path=state_path)
+        publish_state_changed()
+
+    @app.post(
+        "/ui/catalog/upload",
+        include_in_schema=False,
+        dependencies=[Depends(require_auth)],
+    )
+    async def upload_catalog_manifest(request: Request) -> RedirectResponse:
+        """Receive a multipart ``catalog.toml`` upload, save it as
+        ``${BTY_STATE_DIR}/catalog.toml`` (or whatever
+        ``$BTY_CATALOG_FILE`` overrides to), parse, and reload the
+        download manager in-process. 303s back to /ui/images with
+        either a success or ``?error=`` query param so the page's
+        flash slot surfaces the outcome.
+
+        Validation layers, in order:
+
+        * ``file`` field present + an UploadFile.
+        * Size cap: ``CATALOG_UPLOAD_MAX_BYTES`` (1 MiB). A real
+          ``catalog.toml`` is a handful of KB; anything multi-MB
+          is almost certainly an operator dropping the wrong file
+          (an .iso, an image) into the catalog form by mistake,
+          and rejecting at the boundary beats OOM-ing the
+          process trying to parse it as TOML.
+        * Non-empty body.
+        * Filename extension hint (``.toml`` / ``.tml``): served
+          purely as a clearer-error path. The actual gate is the
+          TOML parse below; a .yaml file accidentally renamed
+          to .toml will still bounce on parse failure, and a
+          stripped-extension upload that is valid TOML still
+          works.
+        * Parses as a valid catalog manifest.
+        """
+        form = await request.form()
+        upload = form.get("file")
+        if not isinstance(upload, UploadFile):
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("no file in upload", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        filename = upload.filename or ""
+        if filename and not filename.lower().endswith((".toml", ".tml")):
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    f"unexpected file extension for catalog upload: {filename!r} (expected .toml)",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # Read up to the cap+1 so we can distinguish "exactly the
+        # cap" from "more than the cap".
+        content = await upload.read(CATALOG_UPLOAD_MAX_BYTES + 1)
+        if len(content) > CATALOG_UPLOAD_MAX_BYTES:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    f"catalog upload exceeded {CATALOG_UPLOAD_MAX_BYTES} bytes; "
+                    "is this actually a catalog.toml?",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        if not content:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("upload was empty", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # Parse the uploaded TOML and import each entry into the
+        # ``catalog_entries`` DB so the table on /ui/images picks
+        # the rows up. Also persist the bytes to ``manifest_path``
+        # so the import is durable across restarts (the lifespan
+        # auto-import seeds the DB from this file on the next boot).
+        try:
+            parsed = _catalog.load_bytes(content, source="<upload>")
+        except _catalog.CatalogError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"catalog parse failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        import_parsed_catalog(
+            parsed, source="<upload>", source_ip=_client_ip(request), state_path=state_path
+        )
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_bytes(content)
+        await _reload_catalog_from_disk()
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.post(
+        "/ui/catalog/fetch-release",
+        include_in_schema=False,
+        dependencies=[Depends(require_auth)],
+    )
+    async def fetch_release_catalog() -> RedirectResponse:
+        """Fetch ``catalog.toml`` from the bty project's GitHub
+        release page (``releases/latest/download/catalog.toml``),
+        save it at the manifest path, and reload. Symmetric with the
+        boot-artifacts page's "Fetch latest release" button.
+
+        Error paths surface via ``?error=`` so the operator sees
+        what went wrong on the /ui/images flash slot:
+
+        * Network failure / timeout -> URLError / TimeoutError.
+        * HTTP non-2xx (e.g. release tag has no catalog.toml asset
+          and GitHub returns a 404 HTML page) -> HTTPError, caught
+          by the same URLError branch since HTTPError is a
+          URLError subclass.
+        * Oversized body (release page returned something
+          unexpected and huge) -> rejected against
+          ``CATALOG_UPLOAD_MAX_BYTES`` before parse.
+        * Non-TOML body (e.g. HTML 404) -> caught by load_bytes'
+          TOMLDecodeError -> CatalogError.
+        """
+        with _db.open_db(state_path) as conn:
+            catalog_url = _settings_store.resolve_catalog_url(conn)
+
+        def _fetch_sync() -> bytes:
+            # urllib.request.urlopen is blocking; run it on a worker
+            # thread via asyncio.to_thread so a slow/unreachable
+            # release page doesn't stall the event loop for the full
+            # 30-second timeout. Other requests (including SSE
+            # heartbeats) would otherwise queue behind it.
+            with urllib.request.urlopen(catalog_url, timeout=30) as resp:
+                # Bound the read at the catalog upload cap + 1 byte
+                # so a release page that responds with a huge
+                # unexpected body (HTML, a binary asset that
+                # somehow got the catalog.toml URL pointed at it)
+                # can't OOM the worker.
+                body: bytes = resp.read(CATALOG_UPLOAD_MAX_BYTES + 1)
+                return body
+
+        try:
+            content = await asyncio.to_thread(_fetch_sync)
+        except (urllib.error.URLError, TimeoutError) as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"release fetch failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        if len(content) > CATALOG_UPLOAD_MAX_BYTES:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    f"fetched catalog exceeded {CATALOG_UPLOAD_MAX_BYTES} bytes; "
+                    "release URL did not serve a catalog.toml",
+                    safe="",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        if not content:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote("fetched catalog was empty", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        try:
+            parsed = _catalog.load_bytes(content, source=catalog_url)
+        except _catalog.CatalogError as exc:
+            return RedirectResponse(
+                "/ui/images?error="
+                + urllib.parse.quote(f"fetched catalog parse failed: {exc}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        # Import rows into the ``catalog_entries`` DB AND persist
+        # the bytes to ``manifest_path`` so the import is durable
+        # across restarts (the lifespan auto-import seeds the DB
+        # from this file on the next boot).
+        import_parsed_catalog(parsed, source=catalog_url, source_ip=None, state_path=state_path)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_bytes(content)
+        await _reload_catalog_from_disk()
+        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
