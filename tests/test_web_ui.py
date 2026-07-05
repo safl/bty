@@ -1144,9 +1144,9 @@ def test_ui_catalog_entry_form_happy_path_lands_row_and_303s(
     new ``catalog_entries`` row is visible via the JSON
     ``GET /catalog/entries`` endpoint. Stubs the size-probe HEAD
     so no real network call leaves the test."""
-    from bty.web import _app as _web_app
+    from bty.web import _helpers
 
-    monkeypatch.setattr(_web_app, "_head_content_length", lambda url: None)
+    monkeypatch.setattr(_helpers, "head_content_length", lambda url: None)
     _login(client)
     r = client.post(
         "/ui/catalog/entries",
@@ -1280,9 +1280,9 @@ def _seed_https_entry(
     ``bty_image_ref``. Used by the pre-warm / warm-state tests below
     so each test carries its own known ref.
     """
-    from bty.web import _app as _web_app
+    from bty.web import _helpers
 
-    monkeypatch.setattr(_web_app, "_head_content_length", lambda _u: None)
+    monkeypatch.setattr(_helpers, "head_content_length", lambda _u: None)
     _login(client)
     r = client.post(
         "/ui/catalog/entries",

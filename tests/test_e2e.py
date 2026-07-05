@@ -756,9 +756,9 @@ def test_e2e_catalog_entry_lifecycle_via_ui_endpoints(
     the delete button can be found), AND the delete actually removes
     the row.
     """
-    from bty.web import _app as _web_app
+    from bty.web import _helpers
 
-    monkeypatch.setattr(_web_app, "_head_content_length", lambda _url: None)
+    monkeypatch.setattr(_helpers, "head_content_length", lambda _url: None)
 
     src = "https://example.invalid/rolling.img.gz"
     r = app_client.post(
@@ -1562,9 +1562,9 @@ def test_e2e_catalog_entry_add_accepts_matching_ref(
     test asserts the verification path doesn't reject a legit
     client.
     """
-    from bty.web import _app as _web_app
+    from bty.web import _helpers
 
-    monkeypatch.setattr(_web_app, "_head_content_length", lambda _url: None)
+    monkeypatch.setattr(_helpers, "head_content_length", lambda _url: None)
     image_url = "https://example.invalid/ref-ok"
     right_ref = _catalog.image_ref_for_src(image_url)
 
