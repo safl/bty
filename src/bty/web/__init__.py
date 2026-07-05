@@ -72,7 +72,7 @@ def _resolve_config_paths(cli_paths: list[str] | None) -> list[Path] | None:
     return env_paths or None
 
 
-def _resolve_secret_key(state_dir: Path) -> str:
+def resolve_secret(state_dir: Path) -> str:
     """Return the per-server session-cookie secret.
 
     Resolution chain:
@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> None:
 
     state_path = cfg.state_db
     boot_root: Path | None = cfg.boot_dir
-    secret_key = _resolve_secret_key(state_path.parent)
+    secret_key = resolve_secret(state_path.parent)
 
     app = create_app(
         state_path=state_path,
