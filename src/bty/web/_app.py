@@ -84,6 +84,7 @@ from bty.web._helpers import (
 )
 from bty.web._reqctx import client_ip as _client_ip
 from bty.web._reqctx import normalise_mac as _normalise_mac
+from bty.web._routes_releases import register_release_routes
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
 # SessionMiddleware refreshes the cookie on each authed response, so
@@ -1376,84 +1377,14 @@ def create_app(
         publish_state_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    # ---------- release-fetch manager ---------------------------
     # Registered BEFORE the ``GET /boot/{name}`` catch-all so
     # ``/boot/releases`` doesn't get eaten as a missing artifact name.
-    # Powers the trackable "Fetch from GitHub releases" action on
-    # /ui/netboot: ``POST /boot/releases`` enqueues, ``GET /boot/releases``
-    # polls, ``DELETE /boot/releases/{tag}`` cancels.
-
-    @app.get("/boot/releases", dependencies=[Depends(require_auth)])
-    async def list_release_fetches() -> dict[str, Any]:
-        states = await release_fetch_manager.list()
-        return {
-            "boot_root": str(resolved_boot_root),
-            "max_parallel": release_fetch_manager.max_parallel,
-            "fetches": [s.to_dict() for s in states],
-        }
-
-    @app.post(
-        "/boot/releases",
-        status_code=status.HTTP_202_ACCEPTED,
-        dependencies=[Depends(require_auth)],
+    register_release_routes(
+        app,
+        release_fetch_manager=release_fetch_manager,
+        resolved_boot_root=resolved_boot_root,
+        state_path=state_path,
     )
-    async def enqueue_release_fetch(
-        body: _models.ReleaseFetchRequest, request: Request
-    ) -> dict[str, Any]:
-        state = await release_fetch_manager.enqueue(body.tag)
-        # Lifecycle audit event: operator-initiated release fetch.
-        # Pairs with the worker-side ``netboot.artifacts.fetch.started``
-        # and the eventual terminal event.
-        with _db.open_db(state_path) as conn:
-            _log_event(
-                conn,
-                kind="netboot.artifacts.fetch.requested",
-                summary=f"operator requested release fetch for tag {body.tag!r}",
-                subject_kind="netboot",
-                subject_id=body.tag,
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"tag": body.tag},
-            )
-            conn.commit()
-        return state.to_dict()
-
-    @app.delete("/boot/releases/{tag}", dependencies=[Depends(require_auth)])
-    async def cancel_release_fetch(tag: str, request: Request) -> dict[str, Any]:
-        try:
-            state = await release_fetch_manager.cancel(tag)
-        except ValueError as exc:
-            # Symmetric with enqueue: a malformed tag (path traversal,
-            # whitespace, escaped slashes) hits the same _TAG_RE guard
-            # and surfaces as 422 here rather than the previous 404
-            # plus an audit-log row carrying the attacker-controlled
-            # text in subject_id.
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
-            ) from exc
-        if state is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"no active release fetch for tag {tag!r}",
-            )
-        # Operator-side cancel event. The worker writes its own
-        # ``netboot.artifacts.fetch.cancelled`` when it observes the
-        # flag; this row carries source_ip + actor=operator so the
-        # /ui/events filter on actor=operator picks up the intent.
-        with _db.open_db(state_path) as conn:
-            _log_event(
-                conn,
-                kind="netboot.artifacts.fetch.cancelled",
-                summary=f"operator cancelled release fetch for tag {tag!r}",
-                subject_kind="netboot",
-                subject_id=tag,
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"tag": tag, "source": "operator"},
-            )
-            conn.commit()
-        return state.to_dict()
 
     # ---------- backups -----------------------------------------
     # Mirrors the /boot/releases shape (the only other worker-pool
