@@ -18,11 +18,13 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import FileResponse
 
-from bty.web import _db, _models, _security
+from bty.web import _db, _models, _security, _settings_store
 
 
 def row_to_machine(row: sqlite3.Row, labels: list[str]) -> _models.Machine:
@@ -214,6 +216,111 @@ def max_upload_bytes() -> int:
 
     value = _cfg().tuning.max_upload_bytes
     return value if value > 0 else DEFAULT_MAX_UPLOAD_BYTES
+
+
+# Per-state_path display-timezone cache. The TZ rarely changes across
+# a bty-web process lifetime so a single DB read per process (per
+# state.db, in case tests set up multiple) is enough. The Settings
+# POST handler invalidates by calling :func:`invalidate_display_tz_cache`
+# after a successful write so the next render picks up the new value.
+_DISPLAY_TZ_CACHE: dict[str, ZoneInfo] = {}  # str(state_path) -> ZoneInfo
+
+
+def cached_display_tz(state_path: Path) -> ZoneInfo:
+    key = str(state_path)
+    if key in _DISPLAY_TZ_CACHE:
+        return _DISPLAY_TZ_CACHE[key]
+    try:
+        with _db.open_db(state_path) as conn:
+            tz: ZoneInfo = _settings_store.resolve_display_timezone(conn)
+    except (_settings_store.SettingValueError, sqlite3.Error) as exc:
+        # A bad stored value or a transient DB error must not 500
+        # every template render. Fall back to UTC + log the reason:
+        # the Settings page surfaces the parse-error branch, but a
+        # ``sqlite3.OperationalError`` (locked DB, permissions,
+        # missing file mid-rotation) would previously be invisible
+        # to an operator staring at "why is my clock in UTC?".
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "display_tz resolve failed for %s (%s); using UTC", state_path, exc
+        )
+        tz = ZoneInfo("UTC")
+    _DISPLAY_TZ_CACHE[key] = tz
+    return tz
+
+
+def invalidate_display_tz_cache(state_path: Path) -> None:
+    """Drop the cached display TZ for ``state_path``. Called by the
+    Settings POST handler after a successful display.timezone write
+    so the next render reflects the change without a process restart.
+    """
+    _DISPLAY_TZ_CACHE.pop(str(state_path), None)
+
+
+def boot_state(m: Any) -> str:
+    """Lifecycle state for a machine -- the 'where in the cycle' half
+    of the mode/state model. Empty for the non-alternating modes
+    (ipxe-exit, bty-tui). The mode is the operator's intent; this
+    is the transient position within it.
+
+    Two signals feed the state:
+
+    - ``saw_flasher_boot`` -- the bit armed when the box fetched a
+      ``/boot`` artifact. Proves the iPXE chain ran, NOT that the
+      live env actually reached ``bty`` and reported back.
+    - ``known_disks_at`` / ``last_flashed_at`` -- the canonical
+      completion signal for the mode (inventory POSTed / flash
+      /done POSTed). Set ONLY by the live env on success.
+
+    Pre-v0.33.22: state derived only from ``saw_flasher_boot``, so
+    "inventoried; booting disk" / "flashed; booting disk" lit up
+    the moment iPXE pulled the kernel -- BEFORE the live env had
+    a chance to run, let alone report back. Operator-visible
+    symptom: machine shows "inventoried" within seconds of
+    discovery, well before the box could have actually inventoried.
+    Fixed by gating the "done" labels on the matching completion
+    signal AND surfacing a distinct "live env in progress" label
+    for the in-between state.
+
+    ``m`` is ``Any`` because Jinja can pass us a ``sqlite3.Row``,
+    a plain dict, or a Pydantic dataclass depending on the call
+    site -- they all index by string key.
+    """
+    try:
+        mode = m["boot_mode"]
+        armed = bool(m["saw_flasher_boot"])
+    except (KeyError, TypeError, IndexError):
+        return ""
+
+    # Safe lookups for the completion signals -- some call sites
+    # (e.g. mid-discovery rows surfacing on /events) might lack
+    # these columns yet. Treat absent as "no signal".
+    def _has(key: str) -> bool:
+        try:
+            return bool(m[key])
+        except (KeyError, TypeError, IndexError):
+            return False
+
+    if mode == "bty-flash-once":
+        if armed and _has("last_flashed_at"):
+            return "flashed; booting disk"
+        if armed:
+            return "live env running; awaiting flash"
+        return "pending flash"
+    if mode == "bty-flash-always":
+        if armed and _has("last_flashed_at"):
+            return "flashed; booting disk"
+        if armed:
+            return "live env running; awaiting flash"
+        return "ready to flash"
+    if mode == "bty-inventory":
+        if armed and _has("known_disks_at"):
+            return "inventoried; booting disk"
+        if armed:
+            return "live env running; awaiting inventory"
+        return "pending inventory"
+    return ""
 
 
 async def stream_upload(request: Request, root: Path, name: str) -> dict[str, object]:

@@ -1,6 +1,6 @@
-"""Tests for the display-timezone cache helper in ``bty.web._app``.
+"""Tests for the display-timezone cache helper in ``bty.web._helpers``.
 
-Pins the swallow-and-log behaviour of :func:`_cached_display_tz`
+Pins the swallow-and-log behaviour of :func:`cached_display_tz`
 against two failure modes: a stored value the resolver rejects
 (:class:`SettingValueError` -- surfaced on the Settings page), and
 a transient sqlite3 error (locked DB, missing file mid-rotation,
@@ -18,15 +18,15 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from bty.web import _app, _db, _settings_store
+from bty.web import _db, _helpers, _settings_store
 
 
 @pytest.fixture(autouse=True)
 def _clear_cache() -> None:
     """Drop the module-level cache so each test starts from a cold
     resolve. Otherwise the first test's UTC fallback would satisfy
-    every later test's ``_cached_display_tz`` call."""
-    _app._DISPLAY_TZ_CACHE.clear()
+    every later test's ``cached_display_tz`` call."""
+    _helpers._DISPLAY_TZ_CACHE.clear()
 
 
 def test_returns_configured_zone_on_happy_path(tmp_path: Path) -> None:
@@ -39,10 +39,10 @@ def test_returns_configured_zone_on_happy_path(tmp_path: Path) -> None:
         _settings_store.set_value(conn, _settings_store.KEY_DISPLAY_TZ, "Europe/Copenhagen")
         conn.commit()
 
-    tz = _app._cached_display_tz(state)
+    tz = _helpers.cached_display_tz(state)
     assert str(tz) == "Europe/Copenhagen"
     # Cached: the state DB path key lands with the resolved zone.
-    assert _app._DISPLAY_TZ_CACHE[str(state)] is tz
+    assert _helpers._DISPLAY_TZ_CACHE[str(state)] is tz
 
 
 def test_setting_value_error_falls_back_to_utc_and_logs(
@@ -61,8 +61,8 @@ def test_setting_value_error_falls_back_to_utc_and_logs(
         raise _settings_store.SettingValueError("unknown zone 'Mars/Phobos'")
 
     monkeypatch.setattr(_settings_store, "resolve_display_timezone", _raise_bad_value)
-    with caplog.at_level(logging.WARNING, logger="bty.web._app"):
-        tz = _app._cached_display_tz(state)
+    with caplog.at_level(logging.WARNING, logger="bty.web._helpers"):
+        tz = _helpers.cached_display_tz(state)
     assert str(tz) == "UTC"
     assert any("display_tz resolve failed" in r.message for r in caplog.records)
     assert any("Mars/Phobos" in r.message for r in caplog.records)
@@ -86,8 +86,8 @@ def test_sqlite_error_falls_back_to_utc_and_logs(
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(_settings_store, "resolve_display_timezone", _raise_sqlite)
-    with caplog.at_level(logging.WARNING, logger="bty.web._app"):
-        tz = _app._cached_display_tz(state)
+    with caplog.at_level(logging.WARNING, logger="bty.web._helpers"):
+        tz = _helpers.cached_display_tz(state)
     assert str(tz) == "UTC"
     assert any("display_tz resolve failed" in r.message for r in caplog.records)
     assert any("database is locked" in r.message for r in caplog.records)
@@ -109,4 +109,4 @@ def test_unexpected_exception_still_propagates(
 
     monkeypatch.setattr(_settings_store, "resolve_display_timezone", _raise_unexpected)
     with pytest.raises(RuntimeError, match="unexpected bug"):
-        _app._cached_display_tz(state)
+        _helpers.cached_display_tz(state)

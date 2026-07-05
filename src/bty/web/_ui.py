@@ -2200,7 +2200,7 @@ def register_ui_routes(
         """
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-        from bty.web._app import invalidate_display_tz_cache
+        from bty.web._helpers import invalidate_display_tz_cache
 
         raw = display_timezone.strip()
         if raw:
