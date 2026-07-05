@@ -25,6 +25,14 @@ Volume=BTY_DATA_DIR_HERE/bty:/var/lib/bty:Z
 # file. bty-web re-reads on each restart.
 Volume=BTY_TOML_HOST_PATH_HERE:/etc/bty/bty.toml:Z
 Environment=BTY_CONFIG_FILE=/etc/bty/bty.toml
+# nbdmux.client reads this on write endpoints and sends it as
+# ``Authorization: Bearer <pw>`` so bty-web can POST /exports on the
+# JSON control plane without a session cookie. Nbdmux's daemon reads
+# the same env var to compare; keep the two values in sync.
+# NOTE: `bty-lab init --systemd` bakes the operator-chosen value
+# here; the placeholder below only matters if the template is used
+# directly.
+Environment=NBDMUX_ADMIN_PASSWORD=bty-lab
 # Hard-set DNS so external lookups work on stock Ubuntu hosts where
 # systemd-resolved owns /etc/resolv.conf and aardvark-dns isn't
 # installed. Edit if the host needs an internal resolver.

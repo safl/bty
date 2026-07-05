@@ -172,6 +172,13 @@ services:
       # one-shot dev runs / k8s Secrets, but the canonical authoring
       # path is the file.
       BTY_CONFIG_FILE: /etc/bty/bty.toml
+      # nbdmux.client reads this on write endpoints (add_export,
+      # warm_export, remove_export) and sends it as
+      # ``Authorization: Bearer <pw>`` so the JSON control plane
+      # accepts service-to-service calls without a session cookie.
+      # Nbdmux's own daemon reads the same env var to compare;
+      # sharing the value ties both ends of the channel.
+      NBDMUX_ADMIN_PASSWORD: ${{NBDMUX_ADMIN_PASSWORD:?set in envvars}}
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/bty:/var/lib/bty
       # RW (no :ro) so Settings-page edits land back on the host file,
@@ -365,6 +372,7 @@ def _quadlet_bty_web(
     version: str,
     data_dir_abs: Path,
     dest_abs: Path | None = None,
+    nbdmux_pw: str = _PLACEHOLDER_PASSWORD,
 ) -> str:
     """Render the bty-web Quadlet unit.
 
@@ -410,6 +418,12 @@ Volume={data_dir_abs}/bty:/var/lib/bty:Z
 # (no ``:ro``) so Settings writes land back on the host file.
 Volume={toml_host_path}:/etc/bty/bty.toml:Z
 Environment=BTY_CONFIG_FILE=/etc/bty/bty.toml
+# nbdmux.client reads this on write endpoints (add_export,
+# warm_export, remove_export) and sends it as
+# ``Authorization: Bearer <pw>`` so the JSON control plane accepts
+# service-to-service calls without a session cookie. Nbdmux's daemon
+# reads the same env var to compare; keep the two values in sync.
+Environment=NBDMUX_ADMIN_PASSWORD={nbdmux_pw}
 # Hard-set DNS so external lookups work on stock Ubuntu hosts where
 # systemd-resolved owns /etc/resolv.conf and aardvark-dns isn't
 # installed. Edit if the host needs an internal resolver.
@@ -590,7 +604,12 @@ def _emit_deploy_files(
         for fname, body in (
             (
                 "bty-web.container",
-                _quadlet_bty_web(version, data_dir_abs, dest_abs=dest_abs),
+                _quadlet_bty_web(
+                    version,
+                    data_dir_abs,
+                    dest_abs=dest_abs,
+                    nbdmux_pw=nbdmux_pw if nbdmux_pw is not None else _PLACEHOLDER_PASSWORD,
+                ),
             ),
             (
                 "withcache.container",

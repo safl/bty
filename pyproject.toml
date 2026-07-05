@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.65.17"
+version = "0.65.18"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -35,7 +35,7 @@ dependencies = [
     # current bugfix release (0.2.19) so a fresh install doesn't ship
     # with two-minor-old daemon fixes; ceiling below 0.3 so a major
     # bump (bugs / API changes on that line) surfaces on floor lift.
-    "nbdmux>=0.2.19,<0.3",
+    "nbdmux>=0.3.1,<0.4",
 ]
 
 [project.optional-dependencies]
