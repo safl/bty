@@ -301,7 +301,6 @@ class ImageEntry(BaseModel):
     # it's obviously the image's ref) to keep the field tight.
     ref: str = Field(..., pattern=r"^[0-9a-f]{64}$")
     sha_short: str | None = None
-    cached: bool = False
     # Informational architecture hint (``x86_64`` / ``arm64`` / ...);
     # operator-facing display only.
     arch: str | None = None

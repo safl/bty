@@ -211,8 +211,6 @@
                 <tr>
                     <th>Backup ID</th>
                     <th class="text-end">Machines</th>
-                    <th class="text-end">Catalog entries</th>
-                    <th class="text-end">Images</th>
                     <th class="text-end">Size</th>
                     <th>bty version</th>
                     <th class="text-end" style="width: 1%; white-space: nowrap;">Actions</th>
@@ -220,14 +218,12 @@
             </thead>
             <tbody>
                 {% if not backups_on_disk %}
-                <tr><td colspan="7" class="text-muted">No backups on disk yet. Click <em>Back up now</em> above, or enable a schedule on the <a href="/ui/settings#backup-schedule">Settings</a> page.</td></tr>
+                <tr><td colspan="5" class="text-muted">No backups on disk yet. Click <em>Back up now</em> above, or enable a schedule on the <a href="/ui/settings#backup-schedule">Settings</a> page.</td></tr>
                 {% else %}
                 {% for b in backups_on_disk %}
                 <tr>
                     <td><code>{{ b.backup_id }}</code></td>
                     <td class="text-end">{{ b.machines }}</td>
-                    <td class="text-end">{{ b.catalog_entries }}</td>
-                    <td class="text-end">{{ b.images }}</td>
                     <td class="text-end small">
                         {% set n = b.bytes_on_disk %}
                         {% if n < 1024 %}{{ n }} B

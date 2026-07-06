@@ -11,18 +11,18 @@ persisted across restarts without touching the systemd unit:
   ``safl/bty``.
 - :data:`KEY_NETBOOT_TAG` -- the release tag the "Fetch artifacts"
   action targets (``latest`` by default).
-- :data:`KEY_CATALOG_URL` -- the URL the "Fetch catalog" action
-  pulls ``catalog.toml`` bytes from. Default
-  :data:`DEFAULT_CATALOG_URL` (the latest nosi release's
-  ``catalog.toml`` asset). A single URL is the natural shape here;
-  unlike netboot (which fetches several assets per release), the
-  catalog is one file. An operator pointing at a fork's catalog
-  just edits the URL.
 
 Resolution order is override (this table) -> environment variable ->
 built-in default. Only :data:`KEY_NETBOOT_REPO` has an env layer
 (:data:`ENV_RELEASE_REPO` is ``BTY_BOOT_RELEASE_REPO``); the netboot
-tag and the catalog URL resolve straight from override to default.
+tag resolves straight from override to default.
+
+The pre-v0.66.0 ``KEY_CATALOG_URL`` / ``DEFAULT_CATALOG_URL`` /
+``resolve_catalog_url`` machinery was retired when withcache became
+the catalog source of truth. bty consumes the catalog via
+``WithcacheCatalog`` (which polls withcache's ``GET /catalog``);
+the operator points bty at withcache via ``KEY_WITHCACHE_URL``
+below.
 """
 
 from __future__ import annotations
@@ -39,30 +39,10 @@ from bty.web._releases import DEFAULT_NETBOOT_REPO, ENV_RELEASE_REPO
 # to it (via :func:`default_netboot_repo`) before the built-in default.
 KEY_NETBOOT_REPO = "upstream.netboot_repo"
 KEY_NETBOOT_TAG = "upstream.netboot_tag"
-KEY_CATALOG_URL = "upstream.catalog_url"
 
 # Default tag for the netboot artifact fetch. GitHub resolves
 # ``latest`` to the most recent non-prerelease, non-draft tag.
 DEFAULT_TAG = "latest"
-
-# Default URL the "Fetch catalog" button pulls bytes from.
-#
-# Points at nosi's ``/releases/latest/`` so a fresh ``bty-lab init``
-# picks up whatever nosi release is current at fetch time, instead
-# of an ISO-week tag baked into the bty version that drifts the
-# moment a new bty release isn't cut.
-#
-# Byte-stability for production -- "two operators on the same bty
-# version see the same catalog content" -- is now provided by
-# withcache (since v0.59.0). Once an operator's withcache has the
-# catalog's referenced images cached, evicting cache entries is
-# how they choose to roll forward; until they do, every fetch
-# resolves to the same cached blob regardless of what ``/latest/``
-# rolled to upstream. Operators who want a hard pin (truly
-# reproducible across cache evictions, or for production deploys
-# where rolling under the operator's feet would surprise) paste a
-# week-tagged URL into Settings -> Catalog.
-DEFAULT_CATALOG_URL = "https://github.com/safl/nosi/releases/latest/download/catalog.toml"
 
 # Optional withcache cache-host. When set, bty prefers it as the image
 # *source* for artifacts it already holds (else serves the artifact as
@@ -159,13 +139,6 @@ def default_netboot_repo() -> str:
 def resolve_netboot_repo(conn: sqlite3.Connection) -> str:
     """The effective netboot release repo: override -> env -> default."""
     return get(conn, KEY_NETBOOT_REPO) or default_netboot_repo()
-
-
-def resolve_catalog_url(conn: sqlite3.Connection) -> str:
-    """The effective catalog URL: override -> :data:`DEFAULT_CATALOG_URL`.
-    The single URL is what the "Fetch catalog" button GETs; pointing at
-    a fork is just a Settings-page edit, no repo + tag composition."""
-    return get(conn, KEY_CATALOG_URL) or DEFAULT_CATALOG_URL
 
 
 def resolve_netboot_tag(conn: sqlite3.Connection) -> str:

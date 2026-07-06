@@ -1860,16 +1860,6 @@ def dashboard_counts_context(conn: Any, unified: list[bty_images.UnifiedImage]) 
         "last_seen": last_seen,
         "last_flashed": last_flashed,
         "img_total": len(unified),
-        "img_cached": sum(1 for u in unified if u.cached),
-        "img_local": sum(1 for u in unified if any(s.kind == "local" for s in u.sources)),
-        "img_http": sum(
-            1
-            for u in unified
-            if any(s.location.startswith(("http://", "https://")) for s in u.sources)
-        ),
-        "img_oras": sum(
-            1 for u in unified if any(s.location.startswith("oras://") for s in u.sources)
-        ),
     }
 
 

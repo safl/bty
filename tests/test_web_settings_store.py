@@ -47,36 +47,6 @@ def test_netboot_repo_db_override_wins_over_env(
         assert _settings_store.resolve_netboot_repo(conn) == "other/repo"
 
 
-def test_catalog_url_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No override -> the built-in default catalog URL (nosi's
-    /releases/latest/download/catalog.toml). The catalog URL has NO
-    env-layer fallback; only an explicit Settings override beats it."""
-    monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
-    with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_catalog_url(conn) == _settings_store.DEFAULT_CATALOG_URL
-
-
-def test_catalog_url_independent_of_netboot_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``$BTY_BOOT_RELEASE_REPO`` only repoints the netboot repo;
-    the catalog URL stays on its default until explicitly overridden."""
-    monkeypatch.setenv(ENV_RELEASE_REPO, "acme/widgets")
-    with _conn(tmp_path) as conn:
-        assert _settings_store.resolve_netboot_repo(conn) == "acme/widgets"
-        assert _settings_store.resolve_catalog_url(conn) == _settings_store.DEFAULT_CATALOG_URL
-
-
-def test_catalog_url_override_wins(tmp_path: Path) -> None:
-    """A ``KEY_CATALOG_URL`` override replaces the default verbatim;
-    no repo/tag composition, no URL rewriting. The fetch handler GETs
-    whatever string the operator pasted."""
-    custom = "https://example.invalid/path/catalog.toml"
-    with _conn(tmp_path) as conn:
-        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_URL, custom)
-        assert _settings_store.resolve_catalog_url(conn) == custom
-
-
 def test_netboot_tag_default_and_override(tmp_path: Path) -> None:
     with _conn(tmp_path) as conn:
         assert _settings_store.resolve_netboot_tag(conn) == _settings_store.DEFAULT_TAG
@@ -86,16 +56,11 @@ def test_netboot_tag_default_and_override(tmp_path: Path) -> None:
 
 def test_clear_reverts_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ENV_RELEASE_REPO, raising=False)
-    custom = "https://example.invalid/forks/catalog.toml"
     with _conn(tmp_path) as conn:
         _settings_store.set_value(conn, _settings_store.KEY_NETBOOT_REPO, "fork/netboot")
-        _settings_store.set_value(conn, _settings_store.KEY_CATALOG_URL, custom)
         assert _settings_store.resolve_netboot_repo(conn) == "fork/netboot"
-        assert _settings_store.resolve_catalog_url(conn) == custom
         _settings_store.clear(conn, _settings_store.KEY_NETBOOT_REPO)
-        _settings_store.clear(conn, _settings_store.KEY_CATALOG_URL)
         assert _settings_store.resolve_netboot_repo(conn) == DEFAULT_NETBOOT_REPO
-        assert _settings_store.resolve_catalog_url(conn) == _settings_store.DEFAULT_CATALOG_URL
 
 
 # ----- Backup schedule resolvers ----------------------------------------
