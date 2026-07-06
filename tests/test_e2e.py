@@ -719,7 +719,7 @@ def test_e2e_inventory_alternates_liveenv_then_sanboot(app_client: TestClient) -
 
 
 # ----------------------------------------------------------------------
-# 4. catalog.toml roundtrip with mixed shapes -> no dupes on /ui/images
+# 4. catalog.toml roundtrip with mixed shapes -> no dupes on /ui/machines
 # ----------------------------------------------------------------------
 
 
@@ -1184,17 +1184,17 @@ def test_e2e_auth_flow_login_access_logout_denied(
     app_client: TestClient,
 ) -> None:
     """Full auth lifecycle:
-      1. Without a cookie, /ui/images redirects to /ui/login.
+      1. Without a cookie, /ui/machines redirects to /ui/login.
       2. POST /ui/login returns a Set-Cookie and 303 to dashboard.
-      3. With the cookie, /ui/images returns 200.
+      3. With the cookie, /ui/machines returns 200.
       4. POST /ui/logout clears the cookie + 303 to login.
-      5. After logout, /ui/images redirects to /ui/login again.
+      5. After logout, /ui/machines redirects to /ui/login again.
 
     Catches: the SessionMiddleware is wired correctly + the
     require_ui_auth dependency does what it advertises.
     """
     # 1. No cookie -> bounced to login.
-    r = app_client.get("/ui/images", follow_redirects=False)
+    r = app_client.get("/ui/machines", follow_redirects=False)
     assert r.status_code in (303, 307), r.text
     assert "/ui/login" in r.headers["location"]
 
@@ -1210,7 +1210,7 @@ def test_e2e_auth_flow_login_access_logout_denied(
     assert new_cookie is not None
 
     # 3. With cookie, protected page renders.
-    r = app_client.get("/ui/images", cookies={"bty-token": new_cookie})
+    r = app_client.get("/ui/machines", cookies={"bty-token": new_cookie})
     assert r.status_code == 200, r.text
 
     # 4. Logout. The endpoint is POST /ui/logout (standard CSRF-
@@ -1275,33 +1275,8 @@ def test_e2e_state_db_schema_stamps_bty_version_on_fresh_db(tmp_path: Path) -> N
 
 
 # ----------------------------------------------------------------------
-# /ui/images error banner is preserved across reloads (operator UX)
+# /ui/machines error banner is preserved across reloads (operator UX)
 # ----------------------------------------------------------------------
-
-
-def test_e2e_ui_images_error_query_param_renders_then_clears(
-    app_client: TestClient,
-) -> None:
-    """``/ui/images?error=<msg>`` renders the flash banner with the
-    error text. Hitting the page WITHOUT the query param after the
-    operator's next action must not retain the banner -- the
-    query-string-driven flash is one-shot by design.
-
-    Pin the operator UX: errors surface visibly but don't get
-    stuck on the page across navigation.
-    """
-    r = app_client.get(
-        "/ui/images",
-        params={"error": "something specific happened: 42"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 200, r.text
-    assert "something specific happened: 42" in r.text
-
-    # Plain GET -- no banner.
-    r = app_client.get("/ui/images", cookies=AUTH)
-    assert r.status_code == 200, r.text
-    assert "something specific happened: 42" not in r.text
 
 
 # ----------------------------------------------------------------------

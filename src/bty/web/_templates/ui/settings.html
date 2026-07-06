@@ -57,63 +57,26 @@
    explanatory callout about the dual-flavour nosi catalog model
    plus the single URL input, so giving it full width keeps the
    call-out readable on wide screens. #}
+{# /ui/images was retired: withcache owns the catalog end-to-end.
+   The old bty-side "Catalog URL" card lived here and pointed at a
+   catalog.toml the /ui/images page fetched; both are gone. Point
+   the operator at withcache instead. #}
 <div class="row g-3 mb-3">
 <div class="col-12">
 <div class="card h-100" id="catalog-source">
     <div class="card-header bg-light fw-semibold">
         <i class="bi bi-collection me-1"></i>Catalog
     </div>
-    <div class="card-body">
-        <p class="small text-muted mb-3">
-            The single URL that the <em>Fetch catalog</em> button
-            on the <a href="/ui/images">Images</a> page GETs. Bytes
-            at that URL must parse as a <code>catalog.toml</code>;
-            the rows are imported into the local catalog table.
-            To point at a fork or a private catalog server, just
-            edit the URL.
-        </p>
-        <div class="border-start border-info border-3 ps-3 small mb-3" role="note">
-            <p class="mb-1">
-                <strong>The default URL is
-                <code>/releases/latest/download/catalog.toml</code></strong>
-                -- a fresh fetch picks up whatever nosi release is
-                current. Byte-stability across operators is provided
-                by withcache (since v0.59.0): once cached, every
-                fetch resolves to the same bytes until an operator
-                evicts the cache entries. Two options if you want
-                something else:
-            </p>
-            <ul class="mb-0 mt-1">
-                <li><strong>Pin to a specific week.</strong> Browse
-                    <a href="https://github.com/safl/nosi/releases"
-                       target="_blank" rel="noopener">safl/nosi releases</a>,
-                    pick a tag (e.g. <code>2026.W26</code>), paste
-                    <code>/releases/download/&lt;tag&gt;/catalog.toml</code>.
-                    Useful for production deploys where rolling under
-                    your feet would surprise.</li>
-                <li><strong>Rolling oras :latest refs.</strong>
-                    Use <code>/releases/latest/download/catalog-latest.toml</code>
-                    (or <code>/releases/download/&lt;tag&gt;/catalog-latest.toml</code>);
-                    image refs are <code>:latest</code> so bty flashes
-                    whatever ghcr currently serves, every flash.</li>
-            </ul>
-        </div>
-        <div class="mb-3">
-            <label for="catalog_url" class="form-label">Catalog URL</label>
-            <input type="url" class="form-control font-monospace" id="catalog_url"
-                   name="catalog_url" placeholder="{{ upstream.catalog_url_default }}"
-                   value="{{ upstream.catalog_url_override or '' }}"
-                   form="upstream-form">
-            <div class="form-text small">
-                Effective:
-                <code>{{ upstream.catalog_url }}</code>{% if not upstream.catalog_url_override %}
-                (default; leave blank to keep){% endif %}.
-            </div>
-        </div>
-        <button type="submit" class="btn btn-primary" form="upstream-form">
-            <i class="bi bi-save me-1"></i>Save
-        </button>
-        <span class="form-text small ms-2">Clear to revert.</span>
+    <div class="card-body small text-muted">
+        The image catalog is served by withcache. Add / edit /
+        remove entries on
+        {% if withcache.url %}
+        <a href="{{ withcache.url|trim('/') }}/ui/catalog">{{ withcache.url }}/ui/catalog</a>.
+        {% else %}
+        the withcache server's <code>/ui/catalog</code> page. Set
+        <em>Withcache URL</em> in the Ramboot card below (bty and
+        nbdmux both consult the same value).
+        {% endif %}
     </div>
 </div>
 </div>{# /col catalog-source #}

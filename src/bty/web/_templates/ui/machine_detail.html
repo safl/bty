@@ -54,8 +54,7 @@
             <dt class="col-sm-3"><i class="bi bi-disc me-1"></i>Image</dt>
             <dd class="col-sm-9">
                 {% if bound %}
-                <a class="text-decoration-none" href="/ui/images"
-                   title="View in the image catalog">{{ bound.name }}</a>
+                <code>{{ bound.name }}</code>
                 <span class="text-muted">({{ bound.format or "?" }}{% if bound.size_bytes %}, {{ bound.size_bytes | filesizeformat(true) }}{% endif %})</span>
                 {% elif m.bty_image_ref %}
                 <span class="text-muted">ref</span>

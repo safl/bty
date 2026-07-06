@@ -393,21 +393,14 @@ def create_app(
         machines = [_ui._row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
 
-    def render_dashboard_panels() -> tuple[str, str]:
-        """Render the two LIVE dashboard panels (machine summary,
-        images) as separate SSE fragments, returned as
-        ``(machine_html, images_html)``. Both come from the same
-        ``_ui.dashboard_counts_context`` builder as the request-time
-        dashboard render so they can't drift. They're published as
-        distinct ``dashboard-machine`` / ``dashboard-images`` events
-        because each lives in its own (independent, equally-spaced)
-        dashboard column."""
+    def render_dashboard_machine_panel() -> str:
+        """Render the LIVE Machine Summary dashboard panel as an SSE
+        fragment. Built from the same ``_ui.dashboard_counts_context``
+        the request-time dashboard render uses so counters can't
+        drift between page load and live update."""
         with _db.open_db(state_path) as conn:
             ctx = _ui.dashboard_counts_context(conn, _list_unified_images())
-        return (
-            jinja.get_template("ui/_dashboard_machine.html").render(**ctx),
-            jinja.get_template("ui/_dashboard_images.html").render(**ctx),
-        )
+        return jinja.get_template("ui/_dashboard_machine.html").render(**ctx)
 
     def publish_state_changed() -> None:
         """Publish fresh snapshots of every SSE-driven UI fragment.
@@ -415,13 +408,13 @@ def create_app(
         Mutating routes call this on commit. Subscribers receive all
         events on the same stream and route to elements with matching
         ``sse-swap`` attributes - the machines table swaps the
-        ``machines-update`` event, the dashboard counters swap the
-        ``dashboard-counts`` event.
+        ``machines-update`` event, the Machine Summary tile swaps
+        the ``dashboard-machine`` event.
         """
         event_bus.publish(MachineEvent(name="machines-update", html=render_machines_tbody()))
-        machine_html, images_html = render_dashboard_panels()
-        event_bus.publish(MachineEvent(name="dashboard-machine", html=machine_html))
-        event_bus.publish(MachineEvent(name="dashboard-images", html=images_html))
+        event_bus.publish(
+            MachineEvent(name="dashboard-machine", html=render_dashboard_machine_panel())
+        )
 
     # ----- Open routes (no auth) ------------------------------------------
 
@@ -1511,9 +1504,7 @@ def create_app(
             # event is routed by the htmx-ext-sse client to whichever
             # element on the page declares ``sse-swap=<name>``.
             yield sse_format("machines-update", render_machines_tbody())
-            _machine_html, _images_html = render_dashboard_panels()
-            yield sse_format("dashboard-machine", _machine_html)
-            yield sse_format("dashboard-images", _images_html)
+            yield sse_format("dashboard-machine", render_dashboard_machine_panel())
             async for event in event_bus.subscribe():
                 # Filter out worker-state events: the machines-stream
                 # client only cares about machine + dashboard fragments.
@@ -1691,8 +1682,9 @@ def create_app(
                     detail=(
                         f"ramboot: ref {body.bty_image_ref[:8]}... is not "
                         f"registered with nbdmux at status='ready'. "
-                        f"Click Pre-warm for this ref on /ui/images first "
-                        f"(or POST /exports directly to nbdmux at {nbdmux_url}/)."
+                        f"Warm it on nbdmux's /ui/exports (or POST /exports "
+                        f"to nbdmux at {nbdmux_url}/) before binding this "
+                        f"machine to ramboot."
                     ),
                 )
         with _db.open_db(state_path) as conn:
