@@ -14,8 +14,6 @@ import json
 import os
 import shutil
 import sqlite3
-import urllib.error
-import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -72,21 +70,6 @@ def row_to_machine(row: sqlite3.Row, labels: list[str]) -> _models.Machine:
 
 def iso_or_none(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
-
-
-def head_content_length(url: str, *, timeout: float = 10.0) -> int | None:
-    """HEAD ``url`` and return the upstream ``Content-Length`` if
-    the server provided one, else ``None``. Best-effort: any
-    network error returns ``None`` rather than raising -- the
-    operator's catalog-add doesn't fail if the upstream doesn't
-    support HEAD or the network is flaky."""
-    try:
-        req = urllib.request.Request(url, method="HEAD")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            cl = resp.headers.get("Content-Length")
-            return int(cl) if cl is not None else None
-    except (urllib.error.URLError, ConnectionError, TimeoutError, ValueError, OSError):
-        return None
 
 
 def now_iso() -> str:
