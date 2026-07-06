@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "bty-lab"
-version = "0.65.17"
+version = "0.65.18"
 source = { editable = "." }
 dependencies = [
     { name = "nbdmux" },
@@ -93,7 +93,7 @@ requires-dist = [
     { name = "tomlkit", marker = "extra == 'web'", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'all'", specifier = ">=0.30" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'web'", specifier = ">=0.30" },
-    { name = "withcache", specifier = ">=0.8.0,<0.9" },
+    { name = "withcache", specifier = ">=0.9.1,<0.10" },
 ]
 provides-extras = ["tui", "web", "all"]
 
@@ -1039,13 +1039,20 @@ wheels = [
 
 [[package]]
 name = "withcache"
-version = "0.8.10"
+version = "0.9.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b6/54/b8c64e680dedfa151ca4a16d9f854ec7268484a10d6ee62d0b59f797b9b3/withcache-0.8.10.tar.gz", hash = "sha256:884b24f1e165413d2b426bf8cc53b00a94f11dcd6550fe7106349174d98948d4", size = 452650, upload-time = "2026-07-04T15:50:35.827Z" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "itsdangerous" },
+    { name = "jinja2" },
+    { name = "python-multipart" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/4f/a5c8339f4d578138d0facea3ee45b5cd3cc371a983835c2d810242d88899/withcache-0.9.1.tar.gz", hash = "sha256:c50fbd2991bacf584587ede56e7ea80876bec0f13705ec3026f3a16e7f9d9f45", size = 464621, upload-time = "2026-07-06T05:31:35.993Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/82/85473b42e355119837f1c108b047a7cbcc07ff9faeb2c1e1a10e2aa1657c/withcache-0.8.10-py3-none-any.whl", hash = "sha256:3d48633bd973216d989373c18175ce3c5c17cb3538f504cf49827583ccc0d017", size = 427941, upload-time = "2026-07-04T15:50:28.402Z" },
-    { url = "https://files.pythonhosted.org/packages/a0/7b/d70b3d5a0e72ec9b752096be544e1be0ce07dd61fe34ff66de05bae9e973/withcache-0.8.10-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:8b568682a1c2566dce9160fce4b9e83cb4b176e94b39b7246b81c8e777568476", size = 639446, upload-time = "2026-07-04T15:50:29.944Z" },
-    { url = "https://files.pythonhosted.org/packages/b3/34/f341faff9ae79e8013ca6b32a518881f379d2099a4ec8512bcbce2b26dd0/withcache-0.8.10-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:c147f1acd296659c295e5a50b02b45e2ae0666d20ff28a47b7a1a58f4414b2aa", size = 621749, upload-time = "2026-07-04T15:50:31.443Z" },
-    { url = "https://files.pythonhosted.org/packages/4e/1c/14b6711765c1c6309a2e890d01431d2b50b1b7dffd0fcbaf0e8af0c4ad92/withcache-0.8.10-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:0fb6ba3716c00ad223ea0a1de07bb4dd436e7bc494e9ac7200a5bf0ffc8d0750", size = 639447, upload-time = "2026-07-04T15:50:32.667Z" },
-    { url = "https://files.pythonhosted.org/packages/13/56/656d58f97bc031918b45a6e02db16b4f4eed01a4071036fe5f872c0c2542/withcache-0.8.10-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:c4c4feaa3cc98b1534f65401cba63df40dc7f560d696365e4aaaecb1a1e84740", size = 621750, upload-time = "2026-07-04T15:50:34.232Z" },
+    { url = "https://files.pythonhosted.org/packages/05/99/b43ca7409fcb406ced5ac8dbb4a11e69cbf29ff153288a4ef5c82331d563/withcache-0.9.1-py3-none-any.whl", hash = "sha256:3b7887368ec682b684b6b9d463965f3cbf9d349e880b9c2fd83f9eb32bdce736", size = 442397, upload-time = "2026-07-06T05:31:27.06Z" },
+    { url = "https://files.pythonhosted.org/packages/af/82/2681e1d7a54107c50e707698d68079460e8c96efd622c2eb96f6a68e4573/withcache-0.9.1-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:766e3c318e2c559d8577d0ad86452e00a9d4b5bdfe9f4a6c1b58768ad4c72ccc", size = 653902, upload-time = "2026-07-06T05:31:28.742Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/6d/bbbcee5afca829fb3b93bd98245170fd9ed7c5c12b10db8c927229db2b7c/withcache-0.9.1-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:1779daa47371b9c08cea5608216ee50a24b8b8fe7e3495b49b4cbd2d72f1b467", size = 636201, upload-time = "2026-07-06T05:31:30.238Z" },
+    { url = "https://files.pythonhosted.org/packages/17/07/799de771a9c25ff2bde73ded90b20a09e501a596adaa09b0919ed44e8fde/withcache-0.9.1-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:0403f1b3fb16ad18ba6e3bcabe71d2adce72f233f52d355402607a12052691f8", size = 653902, upload-time = "2026-07-06T05:31:32.207Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/b8/2e4638b9723febfa1a8295bedc874d260d744f4be88b6e9a873d8d7d38d9/withcache-0.9.1-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:6970f7ef34fd7939bb431ff7300dfc4f63cdac1e22f4931f871c0247b7b20951", size = 636203, upload-time = "2026-07-06T05:31:34.384Z" },
 ]

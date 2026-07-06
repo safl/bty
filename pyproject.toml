@@ -17,15 +17,14 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
-    # ``withcache`` owns the OCI / ORAS dance for us. Operators can run a
-    # cache-host on the LAN to absorb ghcr.io's CDN-stream-cut behaviour
-    # (signed-URL TTL kills HTTP/2 transfers mid-stream) and bty calls
-    # ``withcache.oras`` directly for catalog-import-time digest
-    # resolution. bty previously vendored its own ``bty.oras``; that
-    # module was moved upstream in withcache 0.6.0. Floor tracks the
-    # current release line (0.8.x); pin below 0.9 so a major bump
-    # (release notes required) can't slip in on a floor lift.
-    "withcache>=0.8.0,<0.9",
+    # ``withcache`` owns the OCI / ORAS dance for us + is the single
+    # source of truth for the image catalog. bty consumes the catalog
+    # through ``withcache.client.list_catalog`` / ``add_catalog_entry``
+    # (added in 0.9.1) and calls ``withcache.oras`` directly for
+    # catalog-add-time digest resolution. Floor pinned at 0.9.1 (the
+    # release that added the JSON catalog API + Bearer auth); ceiling
+    # below 0.10 so a major bump can't slip in.
+    "withcache>=0.9.1,<0.10",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
     # As of v0.2.0 nbdmux owns the fetch + decompress pipeline too

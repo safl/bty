@@ -83,6 +83,7 @@ from bty.web._routes_backups import register_backup_routes
 from bty.web._routes_catalog import import_parsed_catalog, register_catalog_routes
 from bty.web._routes_events import register_event_routes
 from bty.web._routes_releases import register_release_routes
+from bty.web._withcache_catalog import WithcacheCatalog as _WithcacheCatalog
 
 # Session cookie max-age. Sliding TTL on the browser side; Starlette's
 # SessionMiddleware refreshes the cookie on each authed response, so
@@ -254,6 +255,20 @@ def create_app(
         # /ui/machines/{mac} dropdown shows them.
         if catalog_state.catalog is not None:
             _auto_import_manifest_rows(catalog_state.catalog)
+        # Prime the withcache-catalog cache. Since withcache 0.9.1 the
+        # catalog is single-sourced from withcache; the ``GET /catalog``
+        # roundtrip populates ``app.state.withcache_catalog`` so the
+        # first render doesn't have to wait for the operator to click
+        # Refresh. Silent no-op when the withcache URL isn't
+        # configured yet (fresh deploy pre-Settings-save).
+        with _db.open_db(state_path) as _wc_conn:
+            _wc_url = _settings_store.resolve_withcache_url(_wc_conn)
+        if _wc_url:
+            _app.state.withcache_catalog.set_withcache_url(_wc_url)
+            try:
+                _app.state.withcache_catalog.refresh()
+            except Exception as exc:
+                _lifespan_log.warning("withcache catalog refresh at startup failed: %s", exc)
         # Backup scheduler loop. Ticks every 60s; reads cadence +
         # last_run_at on every tick so a Settings change reflects
         # without restart. Stop signalled by ``backup_stop_event``,
@@ -380,6 +395,16 @@ def create_app(
     _db.init_db(state_path)
 
     app = FastAPI(title="bty-web", version=bty.__version__, lifespan=_lifespan)
+
+    # Withcache-backed catalog cache. Since withcache 0.9.1 the catalog
+    # is single-sourced from withcache; bty caches a snapshot in
+    # memory here and every image-lookup + machine-binding read site
+    # will hit this cache instead of a local ``catalog_entries``
+    # table. Initialised empty because the withcache URL comes from
+    # settings (which needs a DB open); the lifespan hook does the
+    # first refresh once ``_settings_store.resolve_withcache_url`` is
+    # callable.
+    app.state.withcache_catalog = _WithcacheCatalog(withcache_url=None)
 
     # Server-signed session cookie via Starlette's SessionMiddleware.
     # ``same_site="strict"`` blocks cross-site cookie attachment;
