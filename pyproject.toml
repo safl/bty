@@ -20,21 +20,21 @@ dependencies = [
     # ``withcache`` owns the OCI / ORAS dance for us + is the single
     # source of truth for the image catalog. bty consumes the catalog
     # through ``withcache.client.list_catalog`` / ``add_catalog_entry``
-    # (added in 0.9.1) and calls ``withcache.oras`` directly for
-    # catalog-add-time digest resolution. Floor pinned at 0.9.1 (the
-    # release that added the JSON catalog API + Bearer auth); ceiling
-    # below 0.10 so a major bump can't slip in.
-    "withcache>=0.9.1,<0.10",
+    # and calls ``withcache.oras`` directly for catalog-add-time digest
+    # resolution. Floor pinned at 0.11.0 -- since that release
+    # ``GET /catalog`` returns only downloaded entries (presence in
+    # the JSON IS the readiness signal), which the v0.68.0 bind
+    # gate + flash-plan renderer both depend on. Ceiling below 0.12
+    # so a major bump can't slip in.
+    "withcache>=0.11.0,<0.12",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
-    # As of v0.2.0 nbdmux owns the fetch + decompress pipeline too
-    # (it lifted the worker we previously kept here); bty only
-    # validates readiness via ``nbdmux.client.list_exports`` at PXE
-    # chain time and at machine-binding time. Floor pinned at the
-    # current bugfix release (0.2.19) so a fresh install doesn't ship
-    # with two-minor-old daemon fixes; ceiling below 0.3 so a major
-    # bump (bugs / API changes on that line) surfaces on floor lift.
-    "nbdmux>=0.3.1,<0.4",
+    # bty validates readiness via ``nbdmux.client.list_exports`` at
+    # PXE chain time and at machine-binding time. Floor pinned at
+    # 0.5.0 -- since that release nbdmux relies on withcache 0.11's
+    # already-filtered catalog envelope. Ceiling below 0.6 so a
+    # major bump surfaces on floor lift.
+    "nbdmux>=0.5.0,<0.6",
 ]
 
 [project.optional-dependencies]
