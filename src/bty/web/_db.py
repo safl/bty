@@ -88,10 +88,10 @@ def default_state_path() -> Path:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
     mac                       TEXT PRIMARY KEY,
-    -- Binding target: ``catalog_entries.bty_image_ref`` (sha256
-    -- of canonicalised src), not the content sha. Lets operators
-    -- bind rolling-tag oras refs and URL-only entries that have
-    -- no pre-known content sha.
+    -- Binding target: ``WithcacheCatalog`` entry's
+    -- ``bty_image_ref`` (sha256 of canonicalised src), not the
+    -- content sha. Lets operators bind rolling-tag oras refs and
+    -- URL-only entries that have no pre-known content sha.
     bty_image_ref             TEXT,
     discovered_at             TEXT,    -- first /pxe/{mac} contact (NULL if PUT-created)
     last_seen_at              TEXT,    -- most recent /pxe/{mac} contact
@@ -162,48 +162,9 @@ CREATE TABLE IF NOT EXISTS machine_labels (
 );
 CREATE INDEX IF NOT EXISTS machine_labels_label_idx ON machine_labels(label);
 
--- Operator-curated catalog entries.
---
--- ``bty_image_ref`` is the stable provenance identifier:
--- sha256(canonicalise_src(src)). Primary key. The value
--- ``machines.bty_image_ref`` references.
---
--- ``src`` is the operator-typed source (file://, http(s)://, or
--- oras://). UNIQUE -- two rows can't share a src. Different srcs
--- whose content happens to match end up as distinct entries with
--- potentially-equal ``disk_image_sha``.
---
--- ``disk_image_sha`` is the OBSERVED content hash. Populated only
--- when the catalog source declares it (TOML manifest's ``sha256``,
--- the operator-supplied ``sha_url`` adjacent to an https entry, or
--- the digest baked into an oras blob layer). May stay NULL for any
--- entry whose publisher did not pin a sha.
---
--- ``resolved_src`` is the plain-HTTPS URL the catalog row actually
--- fetches from. For ``http(s)://`` srcs this equals ``src``. For
--- ``oras://`` srcs this is the registry blob URL (e.g.
--- ``https://ghcr.io/v2/<repo>/blobs/sha256:<digest>``) that bty-web
--- resolves once at catalog import via ``withcache.oras.resolve_ref``;
--- downstream consumers (the withcache HEAD probe on the check-entry
--- endpoint, the PXE plan's ``serve_url`` rewrite) key on this URL
--- so withcache stays oras-blind. NULL only for legacy rows that
--- pre-date import-time resolution (a fresh schema never writes NULL).
-CREATE TABLE IF NOT EXISTS catalog_entries (
-    bty_image_ref  TEXT PRIMARY KEY,
-    src            TEXT NOT NULL UNIQUE,
-    resolved_src   TEXT,
-    disk_image_sha TEXT,
-    name           TEXT NOT NULL,
-    sha_url        TEXT,
-    format         TEXT,
-    size_bytes     INTEGER,
-    description    TEXT,
-    added_at       TEXT NOT NULL
-);
-
 -- Slim audit log of operator + machine activity.
 -- Append-only, queryable. Backs the /ui/events page + per-subject
--- embedded lists on /ui/machines/{mac} and /ui/images.
+-- embedded lists on /ui/machines/{mac}.
 CREATE TABLE IF NOT EXISTS events (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     ts            TEXT NOT NULL,        -- ISO 8601 UTC

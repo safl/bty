@@ -9,7 +9,28 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
-## [0.68.0] - 2026-07-06
+## [0.69.0] - 2026-07-06
+
+### Removed
+
+Dead-code tombstones cleaned up post the v0.66.0 catalog cutover:
+
+- `catalog_entries` SQL table (dropped from schema) and its docstring.
+  The table hadn't been read or written to since v0.66.0; withcache
+  owns the catalog now, `WithcacheCatalog.entries` is the in-memory
+  cache bty reads. Existing state.db upgrades keep the empty table
+  for now; a follow-up may DROP TABLE explicitly.
+- `resolve_catalog_url` / `KEY_CATALOG_URL` / `DEFAULT_CATALOG_URL`
+  in `_settings_store`. Retired with the "Fetch catalog" button;
+  operators point bty at withcache via `KEY_WITHCACHE_URL`.
+- `UnifiedImage.cached` (always False since v0.60.0) and the
+  matching `ImageEntry.cached` schema field. Downstream JSON
+  consumers pinning `.cached` will need to drop the check.
+- Dead `img_cached` / `img_local` / `img_http` / `img_oras`
+  dashboard context vars (no template consumed them).
+- `backups.html` "Catalog entries" and "Images" columns (fields
+  don't exist on the backup shape).
+
 
 ### Breaking
 

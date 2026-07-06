@@ -1937,7 +1937,6 @@ def create_app(
                     url=upstream,
                     ref=u.ref,
                     sha_short=u.sha256[:12] if u.sha256 else None,
-                    cached=False,
                     arch=u.arch,
                 )
             )
@@ -2074,7 +2073,6 @@ def create_app(
                     format=entry.get("format"),
                     size_bytes=entry.get("size_bytes"),
                     sources=(source,),
-                    cached=False,
                     arch=entry.get("arch") or images.detect_arch_from_name(name),
                 )
             )
