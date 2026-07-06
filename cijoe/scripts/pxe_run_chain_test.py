@@ -47,9 +47,17 @@ ARTIFACT_NAME_FMTS = (
 )
 
 # bty-web publishes :8080; the test reaches it on the host (seeding via
-# loopback, the client via the bridge IP).
+# loopback, the client via the bridge IP). withcache publishes :8081
+# alongside and is the single source of truth for the catalog since
+# v0.66.0 (bty-web reads GET /catalog + POST /catalog/entries against
+# it). We run withcache on the host network so bty-web can reach it via
+# ``http://127.0.0.1:8081``; the container listens on all interfaces.
 BTY_HTTP_PORT = 8080
+WITHCACHE_HTTP_PORT = 8081
 CONTAINER_NAME = "bty-pxe-test"
+WITHCACHE_CONTAINER_NAME = "withcache-pxe-test"
+WITHCACHE_IMAGE = "ghcr.io/safl/withcache:latest"
+WITHCACHE_PASSWORD = "pxe-test-withcache"
 
 HEALTHZ_TIMEOUT = 180  # container start is far quicker than a VM boot
 CHAIN_TIMEOUT = 600  # total for all client-side markers to appear
@@ -94,10 +102,13 @@ def main(args, cijoe):
             return errno.ENOENT
 
     image = cfg.get("bty_image", "bty-web:pxetest")
+    withcache_image = cfg.get("withcache_image", WITHCACHE_IMAGE)
     seed_base = f"http://127.0.0.1:{BTY_HTTP_PORT}"
+    withcache_base = f"http://127.0.0.1:{WITHCACHE_HTTP_PORT}"
     client_log = workspace / "client.serial.log"
 
     container = None
+    withcache = None
     dnsmasq = None
     client = None
     net_up = False
@@ -105,7 +116,20 @@ def main(args, cijoe):
         _setup_network(cfg, tftproot)
         net_up = True
         dnsmasq = _start_dnsmasq(cfg, tftproot, workspace)
-        container = _run_container(image, cfg["bty_password"])
+
+        # withcache first so bty-web's startup catalog sync can hit
+        # a running server. Both containers listen on the host (bty on
+        # 8080, withcache on 8081); bty-web reaches withcache via
+        # loopback inside the shared host netns.
+        withcache = _run_withcache(withcache_image)
+        log.info(f"Waiting for withcache /healthz on {withcache_base}")
+        if not _wait_until(
+            lambda: _http_ready(withcache_base), HEALTHZ_TIMEOUT, "withcache /healthz"
+        ):
+            log.error("withcache container did not become healthy")
+            return errno.ETIMEDOUT
+
+        container = _run_container(image, cfg["bty_password"], withcache_url=withcache_base)
 
         log.info(f"Waiting for bty-web /healthz on {seed_base}")
         if not _wait_until(lambda: _http_ready(seed_base), HEALTHZ_TIMEOUT, "bty-web /healthz"):
@@ -124,15 +148,11 @@ def main(args, cijoe):
         for name in artifact_names:
             _put_file(seed_base, token, "/boot", boot_stage / name, name)
 
-        # v0.40+: bty-web doesn't accept image uploads. We stage the
-        # dummy image under /boot (which still takes arbitrary uploads
-        # via PUT /boot/<name>) and register it as a catalog entry whose
-        # ``image_url`` points at this server's /boot serve path. The
-        # plan endpoint then hands the live env this URL directly --
-        # bty-web is out of the bytes plane for the catalog entry's
-        # https origin, but /boot's open file-serve still flows the
-        # bytes. Functionally equivalent to the old upload + sidecar
-        # path; structurally fits the v0.40 catalogs-only model.
+        # Stage the dummy image under /boot (arbitrary uploads via
+        # PUT /boot/<name> still work) so the catalog entry's src is
+        # a real reachable URL. bty-web serves the bytes via /boot,
+        # withcache Downloads it into its own cache, then bty binds
+        # the machine to the catalog entry via its bty_image_ref.
         log.info(f"PUT /boot/{cfg['machine_image']} (1 MiB dummy) + sha256 sidecar")
         _put_file(seed_base, token, "/boot", dummy_image, cfg["machine_image"])
         dummy_sha = _sha256_file(dummy_image)
@@ -144,9 +164,14 @@ def main(args, cijoe):
         # from loopback. Use the bridge IP the live env will see.
         catalog_url_base = f"http://{cfg['server_pxe_ip']}:{BTY_HTTP_PORT}"
         image_url = f"{catalog_url_base}/boot/{cfg['machine_image']}"
-        sha_url = f"{catalog_url_base}/boot/{sidecar}"
-        log.info(f"POST /catalog/entries (image_url={image_url})")
-        bty_image_ref = _add_catalog_entry(seed_base, token, image_url, sha_url)
+        log.info(f"withcache POST /catalog/entries (src={image_url})")
+        bty_image_ref = _add_and_download_catalog_entry(withcache_base, image_url)
+
+        log.info("PUT /ui/settings/upstream to trigger withcache_catalog.refresh() on bty")
+        # bty-web polls withcache at startup, but the container has
+        # already started. Force a refresh so the just-added entry
+        # is visible before the machine bind.
+        _refresh_bty_catalog(seed_base, token)
 
         log.info(f"PUT /machines/{cfg['client_mac']} (boot_mode=bty-flash-always)")
         _put_assignment(seed_base, token, cfg, bty_image_ref)
@@ -173,6 +198,7 @@ def main(args, cijoe):
         if client is not None:
             _terminate(client, "client VM")
         _stop_container(container)
+        _stop_container(withcache, name=WITHCACHE_CONTAINER_NAME)
         if dnsmasq is not None:
             _terminate(dnsmasq, "dnsmasq", sudo=True)
         if net_up:
@@ -288,11 +314,16 @@ def _whoami():
 # ---------- bty-web container ----------------------------------------------
 
 
-def _run_container(image, admin_password):
+def _run_container(image, admin_password, *, withcache_url):
     """Run the bty-web container detached, publishing :8080, with the admin
-    password set so the test exercises the gated login path. No volume: the
-    image's /var/lib/bty is writable by the bty user, and the test is
-    throwaway."""
+    password set so the test exercises the gated login path.
+
+    ``withcache_url`` is written as ``BTY_WITHCACHE_URL`` so the
+    withcache_catalog client points at the sibling withcache
+    container (running via --network=host on the same loopback).
+    Host networking keeps the seed URL identical between the host
+    and the container.
+    """
     subprocess.run(
         ["podman", "rm", "-f", CONTAINER_NAME],
         stdout=subprocess.DEVNULL,
@@ -306,10 +337,13 @@ def _run_container(image, admin_password):
             "-d",
             "--name",
             CONTAINER_NAME,
+            "--network=host",
             "-e",
             f"BTY_ADMIN_PASSWORD={admin_password}",
-            "-p",
-            f"{BTY_HTTP_PORT}:{BTY_HTTP_PORT}",
+            "-e",
+            f"BTY_WITHCACHE_URL={withcache_url}",
+            "-e",
+            f"BTY_WITHCACHE_PASSWORD={WITHCACHE_PASSWORD}",
             image,
         ],
         check=True,
@@ -319,11 +353,52 @@ def _run_container(image, admin_password):
     return CONTAINER_NAME
 
 
-def _stop_container(name):
-    if name is None:
+def _run_withcache(image):
+    """Run the withcache container detached on --network=host so
+    both bty-web (loopback via env var) and the test host (loopback
+    via seed URL) can reach it on :8081 without port-forwarding
+    conflicts.
+
+    WITHCACHE_ADMIN_PASSWORD gates the catalog write endpoints; the
+    test posts via ``Authorization: Bearer <pw>`` since it has no
+    session cookie. Since v0.10.0 there is no auto-fetch: the test
+    hits POST /catalog/entries/{name}/download explicitly to fill
+    the cache before the flash chain reads from /b/<url>.
+    """
+    subprocess.run(
+        ["podman", "rm", "-f", WITHCACHE_CONTAINER_NAME],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    subprocess.run(
+        [
+            "podman",
+            "run",
+            "-d",
+            "--name",
+            WITHCACHE_CONTAINER_NAME,
+            "--network=host",
+            "-e",
+            f"WITHCACHE_ADMIN_PASSWORD={WITHCACHE_PASSWORD}",
+            image,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return WITHCACHE_CONTAINER_NAME
+
+
+def _stop_container(handle, *, name=None):
+    """Kill + remove the container identified by ``handle``. When
+    ``handle`` is None but a name is given, still tries to remove
+    the named container (idempotent cleanup)."""
+    target = handle or name
+    if target is None:
         return
     subprocess.run(
-        ["podman", "rm", "-f", name],
+        ["podman", "rm", "-f", target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -499,47 +574,95 @@ def _put_bytes(base, token, base_path, body, name):
             raise RuntimeError(f"PUT {url} returned {resp.status}")
 
 
-def _add_catalog_entry(base, token, image_url, sha_url):
-    """POST /ui/catalog/entries (the form endpoint bty exposes since
-    the withcache-catalog cutover) and return the ``bty_image_ref``.
+def _add_and_download_catalog_entry(withcache_base, image_url):
+    """POST the entry into withcache's catalog, then trigger an
+    explicit Download so the /b/<url> flash path finds a cache hit.
 
-    ``bty_image_ref`` is the sha256 of the canonicalised src URL, so
-    we compute it locally rather than parsing a JSON response (the
-    form endpoint 303s back to /ui/images and doesn't return a body).
-    The form still fires the add path -- which lands the entry in
-    bty's in-memory catalog cache via the withcache-catalog local
-    fallback that activates when no ``WITHCACHE_URL`` is
-    configured on the container.
+    Since withcache v0.10.0 there is no auto-fetch on cache miss;
+    the operator (or this test) hits POST /catalog/entries/{name}/download
+    to fill the cache. The withcache-side worker fetches
+    ``image_url`` (served by bty-web's /boot) and stores it under
+    the canonical cache key.
+
+    Returns the ``bty_image_ref`` for the entry, computed locally
+    as ``sha256(image_url)`` -- the same value bty derives on its
+    side when refreshing the catalog.
     """
-    body = urllib.parse.urlencode({"image_url": image_url, "sha_url": sha_url}).encode("utf-8")
+    name = "pxe-test-image"
+    body = json.dumps(
+        {
+            "name": name,
+            "src": image_url,
+            "resolved_src": image_url,
+            "format": "img",
+        }
+    ).encode("utf-8")
     req = urllib.request.Request(
-        f"{base}/ui/catalog/entries",
+        f"{withcache_base}/catalog/entries",
         data=body,
         method="POST",
         headers={
-            "Cookie": f"bty-token={token}",
-            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Bearer {WITHCACHE_PASSWORD}",
+            "Content-Type": "application/json",
         },
     )
-    # Manual "no follow" so we get the 303 rather than the target's
-    # response. urllib doesn't have a stdlib "don't follow" knob
-    # short of a custom opener; catch HTTPError 3xx instead.
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            if resp.status not in (200, 201, 303):
-                raise RuntimeError(f"POST /ui/catalog/entries returned {resp.status}")
-    except urllib.error.HTTPError as exc:
-        # urlopen raises on 3xx when the opener has no redirect handler
-        # for it; the 303 is the success signal here.
-        if exc.code != 303:
-            raise
-    # ``bty_image_ref = sha256(canonicalise_src(src))``. For the
-    # cijoe test image_url shape (http://<ip>:8080/boot/<name>),
-    # canonicalisation is a no-op: the scheme is already lowercase,
-    # the IP host has no case, and port 8080 isn't the http default
-    # (80) so it's preserved. Directly hash the input to avoid
-    # depending on bty being importable in the cijoe env.
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"withcache POST /catalog/entries returned {resp.status}")
+
+    log.info(f"withcache POST /catalog/entries/{name}/download (async fetch)")
+    dl_req = urllib.request.Request(
+        f"{withcache_base}/catalog/entries/{name}/download",
+        method="POST",
+        headers={"Authorization": f"Bearer {WITHCACHE_PASSWORD}"},
+    )
+    with urllib.request.urlopen(dl_req, timeout=30) as resp:
+        if resp.status not in (200, 201, 202):
+            raise RuntimeError(f"withcache POST download returned {resp.status}")
+
+    # Poll GET /catalog until this entry's ``downloaded_at`` is set,
+    # so bty-web's downloaded-first bind gate accepts the ref.
+    if not _wait_until(
+        lambda: _catalog_entry_downloaded(withcache_base, name),
+        HEALTHZ_TIMEOUT,
+        f"withcache entry {name!r} downloaded",
+    ):
+        raise RuntimeError(
+            f"withcache never marked entry {name!r} as downloaded; "
+            "check the container logs for a fetch error"
+        )
+
     return hashlib.sha256(image_url.encode("utf-8")).hexdigest()
+
+
+def _catalog_entry_downloaded(withcache_base, name):
+    """True iff GET /catalog reports the entry has ``downloaded_at``
+    set. Used as a poll condition for the async Download."""
+    try:
+        with urllib.request.urlopen(f"{withcache_base}/catalog", timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return False
+    for entry in payload.get("entries") or []:
+        if entry.get("name") == name and entry.get("downloaded_at"):
+            return True
+    return False
+
+
+def _refresh_bty_catalog(base, token):
+    """POST /admin/withcache/refresh so bty picks up the catalog
+    entry withcache just registered. bty polls withcache once at
+    process start; a mid-run addition is invisible until refresh
+    fires (this endpoint or a restart)."""
+    req = urllib.request.Request(
+        f"{base}/admin/withcache/refresh",
+        data=b"",
+        method="POST",
+        headers={"Cookie": f"bty-token={token}"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status != 204:
+            raise RuntimeError(f"POST /admin/withcache/refresh returned {resp.status}")
 
 
 def _put_assignment(base, token, cfg, bty_image_ref):
