@@ -625,33 +625,34 @@ def _add_and_download_catalog_entry(withcache_base, image_url):
         if resp.status not in (200, 201, 202):
             raise RuntimeError(f"withcache POST download returned {resp.status}")
 
-    # Poll GET /catalog until this entry's ``downloaded_at`` is set,
-    # so bty-web's downloaded-first bind gate accepts the ref.
+    # Poll GET /catalog until the entry surfaces. Since withcache
+    # v0.11.0 GET /catalog returns ONLY downloaded entries; presence
+    # in the JSON IS the readiness signal, so the entry showing up
+    # means its bytes are on disk.
     if not _wait_until(
-        lambda: _catalog_entry_downloaded(withcache_base, name),
+        lambda: _catalog_entry_visible(withcache_base, name),
         HEALTHZ_TIMEOUT,
         f"withcache entry {name!r} downloaded",
     ):
         raise RuntimeError(
-            f"withcache never marked entry {name!r} as downloaded; "
-            "check the container logs for a fetch error"
+            f"withcache never surfaced entry {name!r} on GET /catalog "
+            "(i.e. never finished downloading it); check the container "
+            "logs for a fetch error"
         )
 
     return hashlib.sha256(image_url.encode("utf-8")).hexdigest()
 
 
-def _catalog_entry_downloaded(withcache_base, name):
-    """True iff GET /catalog reports the entry has ``downloaded_at``
-    set. Used as a poll condition for the async Download."""
+def _catalog_entry_visible(withcache_base, name):
+    """True iff GET /catalog surfaces the named entry. Since
+    withcache v0.11.0 the endpoint only returns downloaded entries,
+    so visibility IS the readiness signal."""
     try:
         with urllib.request.urlopen(f"{withcache_base}/catalog", timeout=5) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return False
-    for entry in payload.get("entries") or []:
-        if entry.get("name") == name and entry.get("downloaded_at"):
-            return True
-    return False
+    return any(entry.get("name") == name for entry in payload.get("entries") or [])
 
 
 def _refresh_bty_catalog(base, token):
