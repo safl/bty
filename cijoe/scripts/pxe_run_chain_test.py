@@ -533,9 +533,13 @@ def _add_catalog_entry(base, token, image_url, sha_url):
         # for it; the 303 is the success signal here.
         if exc.code != 303:
             raise
-    from bty.catalog import image_ref_for_src
-
-    return image_ref_for_src(image_url)
+    # ``bty_image_ref = sha256(canonicalise_src(src))``. For the
+    # cijoe test image_url shape (http://<ip>:8080/boot/<name>),
+    # canonicalisation is a no-op: the scheme is already lowercase,
+    # the IP host has no case, and port 8080 isn't the http default
+    # (80) so it's preserved. Directly hash the input to avoid
+    # depending on bty being importable in the cijoe env.
+    return hashlib.sha256(image_url.encode("utf-8")).hexdigest()
 
 
 def _put_assignment(base, token, cfg, bty_image_ref):
