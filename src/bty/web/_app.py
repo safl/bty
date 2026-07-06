@@ -14,7 +14,6 @@ import contextlib
 import html
 import json
 import re
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,18 +27,15 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import (
     FileResponse,
     PlainTextResponse,
-    RedirectResponse,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
 from nbdmux import client as nbdmux_client
-from starlette.datastructures import UploadFile
 from starlette.middleware.sessions import SessionMiddleware
 
 import bty
-from bty import catalog as _catalog
 from bty import images
 from bty.web import (
     _backup,
@@ -67,7 +63,6 @@ from bty.web._events import (
 )
 from bty.web._events_log import record as _log_event
 from bty.web._helpers import (
-    CATALOG_UPLOAD_MAX_BYTES,
     boot_state,
     cached_display_tz,
     now_iso,
@@ -80,7 +75,6 @@ from bty.web._helpers import (
 from bty.web._reqctx import client_ip as _client_ip
 from bty.web._reqctx import normalise_mac as _normalise_mac
 from bty.web._routes_backups import register_backup_routes
-from bty.web._routes_catalog import import_parsed_catalog, register_catalog_routes
 from bty.web._routes_events import register_event_routes
 from bty.web._routes_releases import register_release_routes
 from bty.web._withcache_catalog import WithcacheCatalog as _WithcacheCatalog
@@ -167,38 +161,6 @@ def create_app(
 
     event_bus = MachineEventBus()
 
-    # Optional catalog file. ``[paths] catalog_file`` (env override
-    # ``BTY_PATHS_CATALOG_FILE``) wins over the ``<state_dir>/catalog.toml``
-    # default. The catalog path is treated as the "always this file"
-    # location so the UI can write a fresh ``catalog.toml`` to it and
-    # reload in-process. When unset and the default file doesn't
-    # exist yet, we still pin the default path so a
-    # ``/ui/catalog/upload`` upload knows where to land.
-    manifest_path = _catalog.default_manifest_path()
-    if manifest_path is None:
-        _cfg_catalog = _cfg().paths.catalog_file
-        manifest_path = Path(_cfg_catalog) if _cfg_catalog else (state_path.parent / "catalog.toml")
-
-    # Mutable holder so a runtime reload (operator uploads a new
-    # catalog.toml from /ui/images) propagates to every closure-
-    # captured handler below. Without this indirection,
-    # ``catalog_state.catalog`` would be a local variable that no other
-    # function can reassign.
-    class _CatalogState:
-        def __init__(self) -> None:
-            self.catalog: _catalog.Catalog | None = None
-
-    catalog_state = _CatalogState()
-    if manifest_path.is_file():
-        try:
-            catalog_state.catalog = _catalog.load(manifest_path)
-        except _catalog.CatalogError as exc:
-            # Don't crash bty-web startup over a malformed catalog;
-            # log it and proceed without the catalog feature. The
-            # operator sees the empty catalog page + can upload a
-            # fresh catalog from the UI to recover.
-            print(f"bty-web: catalog at {manifest_path}: {exc}", file=sys.stderr)
-            catalog_state.catalog = None
     release_fetch_manager = _release_mgr.ReleaseFetchManager()
     backup_manager = _backup.BackupManager()
 
@@ -249,12 +211,6 @@ def create_app(
             state_path,
             resolved_backups_root,
         )
-        # Auto-import manifest entries: a catalog.toml that survived a
-        # restart (operator uploaded it, then bty-web restarted) needs
-        # its entries reflected in catalog_entries so the
-        # /ui/machines/{mac} dropdown shows them.
-        if catalog_state.catalog is not None:
-            _auto_import_manifest_rows(catalog_state.catalog)
         # Prime the withcache-catalog cache. Since withcache 0.9.1 the
         # catalog is single-sourced from withcache; the ``GET /catalog``
         # roundtrip populates ``app.state.withcache_catalog`` so the
@@ -1159,33 +1115,26 @@ def create_app(
         cache_decision: dict[str, Any] | None = None
         if policy in ("bty-flash-always", "bty-flash-once") and ref:
             target_disk_serial = machine.get("target_disk_serial")
-            # One DB connection for the whole flash-plan resolution: the
-            # catalog binding (name/format/src/resolved_src) plus the
-            # withcache lookup, rather than an open-per-field on this hot
-            # path. is_cached's network HEAD stays OUTSIDE the connection.
+            # Look up the entry from the in-memory withcache-catalog
+            # cache; withcache is the single source of truth for
+            # what's flashable. ``withcache_url`` still comes from the
+            # settings store (nbdmux + the flash-plan cache decision
+            # both key on the URL, not on catalog membership).
+            entry = app.state.withcache_catalog.get_by_ref(str(ref))
+            image_name = entry.get("name") if entry else None
+            fmt = entry.get("format") if entry else None
+            src = entry.get("src") if entry else None
+            resolved_src = entry.get("resolved_src") if entry else None
+            # Content hash for on-wire verification. Distinct from
+            # ``ref`` (= bty_image_ref = sha256 of the canonical URL,
+            # an identifier, NOT the bytes). NULL when the entry was
+            # imported without a known sha -> omitted below so the
+            # live env flashes without verifying.
+            disk_image_sha = entry.get("sha256") if entry else None
+            # withcache's lookup keys on ``src`` only (is_cached / blob_url
+            # both take ``src``, never ``resolved_src``). ``resolved_src``
+            # stays purely the non-withcache fallback below.
             with _db.open_db(state_path) as conn:
-                _b = conn.execute(
-                    "SELECT name, format, src, resolved_src, disk_image_sha "
-                    "FROM catalog_entries WHERE bty_image_ref = ?",
-                    (str(ref),),
-                ).fetchone()
-                image_name = str(_b["name"]) if _b and _b["name"] else None
-                fmt = str(_b["format"]) if _b and _b["format"] else None
-                src = str(_b["src"]) if _b and _b["src"] else None
-                resolved_src = str(_b["resolved_src"]) if _b and _b["resolved_src"] else None
-                # Content hash for on-wire verification. Distinct from
-                # ``ref`` (= bty_image_ref = sha256 of the canonical URL,
-                # an identifier, NOT the bytes). NULL when the entry was
-                # imported without a known sha -> omitted below so the
-                # live env flashes without verifying.
-                disk_image_sha = str(_b["disk_image_sha"]) if _b and _b["disk_image_sha"] else None
-                # withcache's lookup keys on ``src`` only (is_cached / blob_url
-                # both take ``src``, never ``resolved_src``), so do NOT gate it
-                # on resolved_src being populated -- that wrongly forced entries
-                # whose import left resolved_src NULL to origin even when the
-                # cache was warm. Match the UI/warm path (``_ui.py``), which
-                # resolves the cache URL from ``conn`` alone. ``resolved_src``
-                # stays purely the non-withcache fallback below.
                 withcache_url = (
                     _settings_store.resolve_withcache_url(conn)
                     if image_name is not None and target_disk_serial
@@ -1534,14 +1483,11 @@ def create_app(
         on the live-env side) or ``None`` for an orphaned binding
         (no catalog row matches this ref).
         """
-        with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT name FROM catalog_entries WHERE bty_image_ref = ?",
-                (ref,),
-            ).fetchone()
-        if row is None:
+        entry = app.state.withcache_catalog.get_by_ref(ref)
+        if entry is None:
             return None
-        return str(row["name"])
+        name = entry.get("name")
+        return str(name) if name else None
 
     # The ``/images/{key}[/{name}]`` oras-fallback stream-proxy was
     # removed in v0.60.0. Its historical role was "let bty-web do the
@@ -2035,70 +1981,34 @@ def create_app(
 
     # Browser UI under /ui/ (Jinja + Bootstrap, cookie-auth).
 
-    def _load_db_catalog_entries() -> tuple[_catalog.CatalogEntry, ...]:
-        """Load all rows from ``catalog_entries`` as :class:`CatalogEntry`
-        records.
-
-        Single shape regardless of whether ``disk_image_sha`` is set:
-        ``CatalogEntry.sha256`` is either the observed content hash
-        or ``None``. The downstream merge keys on both
-        ``bty_image_ref`` (always derivable from ``src``) and on
-        ``sha256`` (when known), so a row without content sha still
-        collapses with the matching manifest entry that produced it.
-
-        Previously this method split into sha-keyed CatalogEntry +
-        url-only UnifiedImage records. The split caused the
-        duplicate-rendering regression on /ui/images: every entry
-        without a pinned sha appeared once in the merge's unhashed
-        tail and once in the url-only verbatim tail. Folding both
-        into one shape lets the merge dedupe by ref.
-
-        ``ORDER BY added_at`` matches the ``list_catalog_entries``
-        API endpoint so the UI's catalog table renders in the same
-        insertion order regardless of which code path populated the
-        page.
-        """
-        with _db.open_db(state_path) as conn:
-            rows = conn.execute(
-                "SELECT disk_image_sha, name, src, format, size_bytes, description "
-                "FROM catalog_entries ORDER BY added_at"
-            ).fetchall()
-        return tuple(
-            _catalog.CatalogEntry(
-                name=row["name"],
-                src=row["src"],
-                sha256=row["disk_image_sha"],  # may be None
-                format=row["format"],
-                size_bytes=row["size_bytes"],
-                description=row["description"],
-                arch=images.detect_arch_from_name(row["name"]),
-            )
-            for row in rows
-        )
-
     def _list_unified_images() -> list[images.UnifiedImage]:
-        """Build the unified image listing from ``catalog_entries`` rows.
+        """Build the unified image listing from withcache's catalog.
 
-        v0.40: bty-web no longer owns image bytes; ``catalog_entries``
-        is the only source of truth. Each row produces one
+        Since v0.66.0 bty consumes withcache's catalog directly (see
+        :mod:`bty.web._withcache_catalog`); ``catalog_entries`` no
+        longer exists. Each entry produces one
         :class:`UnifiedImage`. ``cached`` is always False -- bty-web
         doesn't track withcache's contents here; the live env / wizard
         flashes whichever URL the plan or catalog hands it.
         """
         out: list[images.UnifiedImage] = []
-        for entry in _load_db_catalog_entries():
-            ref = _catalog.image_ref_for_src(entry.src)
-            source = images.ImageSource(kind="manifest", location=entry.src)
+        for entry in app.state.withcache_catalog.entries:
+            src = entry.get("src")
+            ref = entry.get("bty_image_ref")
+            if not src or not ref:
+                continue
+            name = entry.get("name") or ""
+            source = images.ImageSource(kind="manifest", location=src)
             out.append(
                 images.UnifiedImage(
                     ref=ref,
-                    sha256=entry.sha256,
-                    names=(entry.name,),
-                    format=entry.format,
-                    size_bytes=entry.size_bytes,
+                    sha256=entry.get("sha256"),
+                    names=(name,),
+                    format=entry.get("format"),
+                    size_bytes=entry.get("size_bytes"),
                     sources=(source,),
                     cached=False,
-                    arch=entry.arch,
+                    arch=entry.get("arch") or images.detect_arch_from_name(name),
                 )
             )
         return out
@@ -2113,256 +2023,5 @@ def create_app(
         publish_state_changed=publish_state_changed,
         list_unified_images=_list_unified_images,
     )
-
-    register_catalog_routes(app, state_path=state_path)
-    # ---------- catalog download manager ----------------------------------
-    # Authenticated endpoints; only operators logged into the bty-web
-    # UI can enqueue / cancel fetches. Skipped silently when no
-    # manifest is configured.
-
-    # Runtime catalog reload helper. The upload + fetch-release
-    # endpoints both end here: write the manifest file, restart the
-    # download manager with the freshly-parsed catalog, then
-    # propagate via ``catalog_state.catalog`` so every closure-
-    # captured handler sees the new value on its next call.
-    def _auto_import_manifest_rows(catalog: _catalog.Catalog) -> None:
-        """Insert a ``catalog_entries`` row for every manifest entry
-        that doesn't already have one.
-
-        Without this, an operator who uploads a ``catalog.toml`` via
-        /ui/catalog/upload sees the entries on /ui/images (the merge
-        renders them) but the /ui/machines/{mac} "Image" dropdown
-        stays empty for those entries -- the dropdown queries
-        ``catalog_entries`` only. Auto-importing on reload keeps the
-        two views consistent: an upload makes the entries bindable
-        without an extra ``POST /catalog/import`` round-trip.
-
-        ``INSERT OR IGNORE`` -- operator-curated rows (added via
-        the URL form or a prior ``/catalog/import``) for the same
-        src are preserved with their original description / sha_url
-        intact.
-        """
-        now = now_iso()
-        with _db.open_db(state_path) as conn:
-            for entry in catalog.entries:
-                try:
-                    ref = _catalog.image_ref_for_src(entry.src)
-                except ValueError:
-                    continue
-                conn.execute(
-                    "INSERT OR IGNORE INTO catalog_entries "
-                    "(bty_image_ref, src, disk_image_sha, name, sha_url, "
-                    "format, size_bytes, description, added_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        ref,
-                        entry.src,
-                        entry.sha256,
-                        entry.name,
-                        None,
-                        entry.format,
-                        entry.size_bytes,
-                        entry.description,
-                        now,
-                    ),
-                )
-            conn.commit()
-
-    async def _reload_catalog_from_disk() -> None:
-        """Re-read ``manifest_path`` and refresh the in-process catalog.
-
-        Called after a manifest write (UI upload or release fetch).
-        Raises :class:`_catalog.CatalogError` on parse failure -- the
-        caller wraps it into an HTTP 400 + flash error so the
-        operator sees what's wrong rather than getting a silent
-        no-op.
-
-        Auto-imports the parsed entries into ``catalog_entries``
-        as a side-effect so the /ui/machines/{mac} dropdown
-        becomes populated without a separate ``POST /catalog/import``
-        step. Idempotent (``INSERT OR IGNORE``).
-        """
-        new_catalog = _catalog.load(manifest_path)
-        catalog_state.catalog = new_catalog
-        _auto_import_manifest_rows(new_catalog)
-        publish_state_changed()
-
-    # URL for "Fetch from bty project release" -- mirrors the
-    # ``bty`` wizard's ``d`` keystroke (loads
-    # ``releases/latest/download/catalog.toml`` from the bty repo).
-    # The same release page hosts boot artifacts + catalog.toml, so the
-    # netboot release repo and the catalog URL share one default; both
-    # are operator-overridable via the Settings page (resolved per
-    # request below from ``_settings_store`` so a change takes effect
-    # without a restart).
-
-    @app.post(
-        "/ui/catalog/upload",
-        include_in_schema=False,
-        dependencies=[Depends(require_auth)],
-    )
-    async def upload_catalog_manifest(request: Request) -> RedirectResponse:
-        """Receive a multipart ``catalog.toml`` upload, save it as
-        ``${BTY_STATE_DIR}/catalog.toml`` (or whatever
-        ``$BTY_CATALOG_FILE`` overrides to), parse, and reload the
-        download manager in-process. 303s back to /ui/images with
-        either a success or ``?error=`` query param so the page's
-        flash slot surfaces the outcome.
-
-        Validation layers, in order:
-
-        * ``file`` field present + an UploadFile.
-        * Size cap: ``CATALOG_UPLOAD_MAX_BYTES`` (1 MiB). A real
-          ``catalog.toml`` is a handful of KB; anything multi-MB
-          is almost certainly an operator dropping the wrong file
-          (an .iso, an image) into the catalog form by mistake,
-          and rejecting at the boundary beats OOM-ing the
-          process trying to parse it as TOML.
-        * Non-empty body.
-        * Filename extension hint (``.toml`` / ``.tml``): served
-          purely as a clearer-error path. The actual gate is the
-          TOML parse below; a .yaml file accidentally renamed
-          to .toml will still bounce on parse failure, and a
-          stripped-extension upload that is valid TOML still
-          works.
-        * Parses as a valid catalog manifest.
-        """
-        form = await request.form()
-        upload = form.get("file")
-        if not isinstance(upload, UploadFile):
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote("no file in upload", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        filename = upload.filename or ""
-        if filename and not filename.lower().endswith((".toml", ".tml")):
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote(
-                    f"unexpected file extension for catalog upload: {filename!r} (expected .toml)",
-                    safe="",
-                ),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        # Read up to the cap+1 so we can distinguish "exactly the
-        # cap" from "more than the cap".
-        content = await upload.read(CATALOG_UPLOAD_MAX_BYTES + 1)
-        if len(content) > CATALOG_UPLOAD_MAX_BYTES:
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote(
-                    f"catalog upload exceeded {CATALOG_UPLOAD_MAX_BYTES} bytes; "
-                    "is this actually a catalog.toml?",
-                    safe="",
-                ),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        if not content:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote("upload was empty", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        # Parse the uploaded TOML and import each entry into the
-        # ``catalog_entries`` DB so the table on /ui/images picks
-        # the rows up. Also persist the bytes to ``manifest_path``
-        # so the import is durable across restarts (the lifespan
-        # auto-import seeds the DB from this file on the next boot).
-        try:
-            parsed = _catalog.load_bytes(content, source="<upload>")
-        except _catalog.CatalogError as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"catalog parse failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        import_parsed_catalog(
-            parsed, source="<upload>", source_ip=_client_ip(request), state_path=state_path
-        )
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_bytes(content)
-        await _reload_catalog_from_disk()
-        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
-
-    @app.post(
-        "/ui/catalog/fetch-release",
-        include_in_schema=False,
-        dependencies=[Depends(require_auth)],
-    )
-    async def fetch_release_catalog() -> RedirectResponse:
-        """Fetch ``catalog.toml`` from the bty project's GitHub
-        release page (``releases/latest/download/catalog.toml``),
-        save it at the manifest path, and reload. Symmetric with the
-        boot-artifacts page's "Fetch latest release" button.
-
-        Error paths surface via ``?error=`` so the operator sees
-        what went wrong on the /ui/images flash slot:
-
-        * Network failure / timeout -> URLError / TimeoutError.
-        * HTTP non-2xx (e.g. release tag has no catalog.toml asset
-          and GitHub returns a 404 HTML page) -> HTTPError, caught
-          by the same URLError branch since HTTPError is a
-          URLError subclass.
-        * Oversized body (release page returned something
-          unexpected and huge) -> rejected against
-          ``CATALOG_UPLOAD_MAX_BYTES`` before parse.
-        * Non-TOML body (e.g. HTML 404) -> caught by load_bytes'
-          TOMLDecodeError -> CatalogError.
-        """
-        with _db.open_db(state_path) as conn:
-            catalog_url = _settings_store.resolve_catalog_url(conn)
-
-        def _fetch_sync() -> bytes:
-            # urllib.request.urlopen is blocking; run it on a worker
-            # thread via asyncio.to_thread so a slow/unreachable
-            # release page doesn't stall the event loop for the full
-            # 30-second timeout. Other requests (including SSE
-            # heartbeats) would otherwise queue behind it.
-            with urllib.request.urlopen(catalog_url, timeout=30) as resp:
-                # Bound the read at the catalog upload cap + 1 byte
-                # so a release page that responds with a huge
-                # unexpected body (HTML, a binary asset that
-                # somehow got the catalog.toml URL pointed at it)
-                # can't OOM the worker.
-                body: bytes = resp.read(CATALOG_UPLOAD_MAX_BYTES + 1)
-                return body
-
-        try:
-            content = await asyncio.to_thread(_fetch_sync)
-        except (urllib.error.URLError, TimeoutError) as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"release fetch failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        if len(content) > CATALOG_UPLOAD_MAX_BYTES:
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote(
-                    f"fetched catalog exceeded {CATALOG_UPLOAD_MAX_BYTES} bytes; "
-                    "release URL did not serve a catalog.toml",
-                    safe="",
-                ),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        if not content:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote("fetched catalog was empty", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        try:
-            parsed = _catalog.load_bytes(content, source=catalog_url)
-        except _catalog.CatalogError as exc:
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote(f"fetched catalog parse failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        # Import rows into the ``catalog_entries`` DB AND persist
-        # the bytes to ``manifest_path`` so the import is durable
-        # across restarts (the lifespan auto-import seeds the DB
-        # from this file on the next boot).
-        import_parsed_catalog(parsed, source=catalog_url, source_ip=None, state_path=state_path)
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_bytes(content)
-        await _reload_catalog_from_disk()
-        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     return app
