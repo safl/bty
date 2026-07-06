@@ -220,23 +220,29 @@
                 <select name="bty_image_ref" id="bty_image_ref" class="form-select">
                     <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
-                    {# img is a catalog_entries row dict: ``bty_image_ref``
-                       (provenance ID) is the option value; ``disk_image_sha``
-                       is shown alongside when known. Operator binds to
-                       the ref, which is stable across rolling tags and
-                       cache state. #}
-                    <option value="{{ img.bty_image_ref }}" {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}>
+                    {# img is a WithcacheCatalog entry: ``bty_image_ref``
+                       is the option value; ``downloaded_at`` gates
+                       whether the row is bindable. Undownloaded entries
+                       are disabled with a hint pointing at withcache's
+                       Download button, so an operator can't stage a
+                       machine to flash / ramboot bytes withcache hasn't
+                       actually fetched. #}
+                    {% set is_downloaded = img.get('downloaded_at') %}
+                    <option value="{{ img.bty_image_ref }}"
+                            {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}
+                            {% if not is_downloaded %}disabled{% endif %}>
                         {{ img.name }} ({{ img.format or "?" }}{% if img.size_bytes %}, {{ img.size_bytes | filesizeformat(true) }}{% endif %}, ref {{ img.bty_image_ref[:8] }})
+                        {% if not is_downloaded %} - not downloaded on withcache{% endif %}
                     </option>
                     {% endfor %}
                 </select>
                 <div class="form-text">
                     Image bound for flashing (<code>bty-flash-always</code> /
                     <code>bty-flash-once</code>) or for over-NBD ramboot
-                    (<code>ramboot</code>). The same ref drives both paths:
-                    the flash modes dd the image to disk; ramboot pre-warms
-                    it through nbdmux and the target mounts it read-only
-                    with an overlay over tmpfs.
+                    (<code>ramboot</code>). Only entries that withcache
+                    has downloaded are bindable; hit <em>Download</em>
+                    on withcache's <code>/ui/catalog</code> to enable
+                    an entry.
                 </div>
             </div>
             <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once">
