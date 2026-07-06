@@ -30,7 +30,6 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from jinja2 import Environment
-from nbdmux import client as nbdmux_client
 from pydantic import ValidationError
 
 import bty
@@ -216,7 +215,12 @@ def register_ui_routes(
     )
     def ui_dashboard(request: Request) -> HTMLResponse:
         unified = list_unified_images() if list_unified_images is not None else []
-        catalog_entry_count = len(request.app.state.withcache_catalog.entries)
+        catalog = request.app.state.withcache_catalog
+        catalog_entry_count = len(catalog.entries)
+        withcache_url = catalog.withcache_url
+        catalog_href = (
+            f"{withcache_url.rstrip('/')}/ui/catalog" if withcache_url else "/ui/settings"
+        )
         with _db.open_db(state_path) as conn:
             # Live panel context (machine summary + image breakdown),
             # shared with the SSE publisher so the two never drift.
@@ -282,11 +286,11 @@ def register_ui_routes(
                 "detail": (
                     f"{catalog_entry_count} catalog entries, {counts['img_total']} images total."
                     if catalog_ok
-                    else "No catalog entries and no local images."
+                    else "No catalog entries; add one on withcache's /ui/catalog page."
                 ),
-                "href": "/ui/images",
-                "fix_href": "/ui/images",
-                "fix_label": "Fetch catalog",
+                "href": catalog_href,
+                "fix_href": catalog_href,
+                "fix_label": "Open withcache catalog",
             },
             {
                 "label": "TFTP daemon running",
@@ -803,138 +807,6 @@ def register_ui_routes(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    # Sortable column allowlist for ``/ui/images``. Values are keys
-    # into the in-memory sort helper below (NOT raw SQL): the page
-    # builds the row list in Python from the unified-image helper,
-    # so sorting is a list ``sorted()`` rather than ``ORDER BY``.
-    _IMAGES_SORT_KEYS = ("name", "sha256", "format", "arch", "ref")
-
-    def _images_sort_key(column: str) -> Callable[[object], tuple[bool, str]]:
-        """Return a ``key=`` callable for sorting ``UnifiedImage`` records
-        by one of the allowlisted columns. Pulls the first ``name``
-        from the tuple (the human label shown in the cell) and
-        case-folds for stable alphabetic sort; ``None``-valued
-        fields sort last regardless of direction so unknown values
-        cluster together."""
-
-        def _key(img: object) -> tuple[bool, str]:
-            # Read attributes off the dataclass; treat None as a high
-            # sentinel so missing values pile at the end of an ASC sort.
-            if column == "name":
-                names = getattr(img, "names", ())
-                primary = names[0] if names else ""
-                return (False, primary.casefold())
-            value = getattr(img, column, None)
-            if value is None:
-                return (True, "")
-            return (False, str(value).casefold())
-
-        return _key
-
-    def _render_images_page(request: Request) -> HTMLResponse:
-        """Build the context for ``/ui/images`` and render the template.
-
-        The catalog list (``catalog_entries`` rows) is the page's
-        primary content. Three add-paths live in the header: upload
-        a ``catalog.toml`` (``POST /ui/catalog/upload``), fetch the
-        release catalog (``POST /ui/catalog/fetch-release``), or add
-        a single URL (``POST /ui/catalog/entries``).
-
-        ``?error=<msg>`` lands in the layout's flash slot (the form-
-        style ``POST /ui/catalog/entries`` 303s back with that param on
-        validation failure, sha-resolve failure, or duplicate-src 409).
-        """
-        unified = list_unified_images() if list_unified_images is not None else []
-        flash = request.query_params.get("error")
-        catalog_manifest_path = str(_config.cfg().catalog_file)
-        with _db.open_db(state_path) as conn:
-            catalog_url = _settings_store.resolve_catalog_url(conn)
-            image_events = _events_log.list_events(
-                conn, subject_kind="catalog", limit=_events_log.RECENT_EVENTS_LIMIT
-            )
-            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
-        # Per-row ramboot warm state: one poll of nbdmux's /exports
-        # per page render (same shape as the /ui/machines pill code
-        # at line ~470). Blank / unreachable nbdmux -> the column
-        # falls back to "-" and the Pre-warm button hides.
-        warm_status_by_ref = _ramboot.status_by_ref(nbdmux_url)
-
-        # ``?q=<text>`` is a substring filter across the name, format,
-        # arch, and ref so an operator typing "freebsd" sees only the
-        # freebsd-named images. Case-insensitive; trimmed; empty
-        # silently disables.
-        q_raw = request.query_params.get("q") or ""
-        q_norm = q_raw.strip()
-        if q_norm:
-            needle = q_norm.casefold()
-
-            def _matches(img: object) -> bool:
-                fields = (
-                    " ".join(getattr(img, "names", ()) or ()),
-                    getattr(img, "format", None) or "",
-                    getattr(img, "arch", None) or "",
-                    getattr(img, "ref", None) or "",
-                    getattr(img, "sha256", None) or "",
-                )
-                return needle in " ".join(fields).casefold()
-
-            unified = [u for u in unified if _matches(u)]
-
-        # Sort + paginate the (already filtered) in-memory list. The
-        # catalog rarely exceeds ~30 rows today, so a Python sort +
-        # slice is cheap; the operator still gets bookmarkable URL
-        # state and consistent table chrome with the other pages.
-        sort = _table_state.parse_sort(
-            request.query_params,
-            allowed={k: k for k in _IMAGES_SORT_KEYS},
-            default_column="name",
-        )
-        sorted_unified = sorted(
-            unified,
-            key=_images_sort_key(sort.column),
-            reverse=sort.direction == "desc",
-        )
-        page_state = _table_state.parse_pagination(request.query_params, total=len(sorted_unified))
-        preserved = {
-            "sort": sort.column,
-            "dir": sort.direction,
-            "q": q_norm,
-            "per_page": (
-                str(page_state.per_page)
-                if page_state.per_page != _table_state.DEFAULT_PER_PAGE
-                else ""
-            ),
-        }
-        return render(
-            "ui/images.html",
-            request,
-            unified=sorted_unified[page_state.offset : page_state.offset + page_state.limit],
-            image_events=image_events,
-            manifest_path=catalog_manifest_path,
-            catalog_url=catalog_url,
-            q=q_norm,
-            sort=sort,
-            page=page_state,
-            preserved=preserved,
-            flash=flash,
-            flash_kind="danger" if flash else None,
-            warm_status_by_ref=warm_status_by_ref,
-            nbdmux_configured=bool(nbdmux_url),
-        )
-
-    @app.get(
-        "/ui/images",
-        response_class=HTMLResponse,
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_images(request: Request) -> HTMLResponse:
-        """The image catalog: one row per ``catalog_entries`` row.
-        Add-paths (upload TOML / fetch release / add URL) live in the
-        page's header; active netboot fetches live on ``/ui/netboot``;
-        backups on ``/ui/backups``."""
-        return _render_images_page(request)
-
     @app.get(
         "/ui/backups",
         response_class=HTMLResponse,
@@ -1040,254 +912,6 @@ def register_ui_routes(
             "machines": snapshot.machines,
             "bytes_on_disk": snapshot.bytes_on_disk,
         }
-
-    @app.post(
-        "/ui/catalog/entries/check",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_catalog_entry_check(
-        src: Annotated[str, Form()],
-    ) -> dict[str, Any]:
-        """Ad-hoc "Check" for one catalog source: is the origin
-        reachable (+ how big), and does withcache already hold it?
-
-        The withcache HEAD also warms an auto-fetch cache, so on a miss
-        this doubles as a one-click "start caching it": click again
-        shortly and it flips to cached. Strictly point-in-time: the
-        result can change at any moment (a network blip, or withcache
-        finishing a background fill). Never 500s on a dead origin: an
-        unreachable source is a normal result here (reported as
-        ``origin.reachable = false``), same as the catalog-add path.
-
-        Withcache 0.6.0+ is oras-aware: a HEAD against
-        ``<withcache>/b/<b64(oras://...)>/...`` warms the cache and
-        withcache mints its own anonymous OCI bearer to fetch from
-        the registry. So this endpoint just HEADs withcache against
-        the original ``src`` URL regardless of scheme; no bearer
-        plumbing in bty.
-        """
-        from bty import flash as _flash
-        from bty.web import _withcache
-
-        origin: dict[str, Any]
-        try:
-            info = _flash.probe_image_url(src)
-            origin = {
-                "reachable": True,
-                "size_bytes": info.size_bytes or None,
-                "format": info.format,
-            }
-        except Exception as exc:
-            # FileNotFoundError (unreachable / 4xx / 5xx / oras resolve
-            # fail) or ValueError (unsupported scheme): both are "not
-            # deployable right now", not server errors.
-            origin = {"reachable": False, "error": str(exc)}
-
-        with _db.open_db(state_path) as conn:
-            withcache_url = _settings_store.resolve_withcache_url(conn)
-
-        if not withcache_url:
-            withcache = {"configured": False}
-        elif src.startswith(("http://", "https://", "oras://")):
-            hit = _withcache.is_cached(withcache_url, src)
-            withcache = {"configured": True, "hit": hit, "warmed": not hit}
-        else:
-            # ``file://`` or another scheme: not applicable. Operators
-            # who want caching for these add an HTTPS or oras catalog
-            # entry pointing at the same bytes.
-            withcache = {"configured": True, "applicable": False}
-
-        return {
-            "src": src,
-            "origin": origin,
-            "withcache": withcache,
-            "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        }
-
-    @app.post(
-        "/ui/catalog/refresh",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_catalog_refresh(request: Request) -> RedirectResponse:
-        """Re-fetch the catalog from withcache and refresh bty's
-        in-memory cache.
-
-        Adds / edits / deletes happen on the withcache server's
-        ``/ui/catalog`` page (single source of truth since v0.66.0);
-        this endpoint is the "pull the latest" affordance on the bty
-        side. A transport failure preserves the prior cache and
-        surfaces the error on the redirect + in the events log.
-        """
-        from withcache import client as _wc_client
-
-        cat = request.app.state.withcache_catalog
-        if not cat.configured:
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote(
-                    "withcache URL not configured; set it on /ui/settings.", safe=""
-                ),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        try:
-            cat.refresh()
-        except _wc_client.WithcacheError as exc:
-            error_summary = str(exc)
-            with _db.open_db(state_path) as conn:
-                _events_log.record(
-                    conn,
-                    kind="catalog.refresh.failed",
-                    summary=f"catalog refresh from withcache failed: {error_summary}",
-                    subject_kind="catalog",
-                    subject_id=cat.withcache_url or "",
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={"error": error_summary},
-                )
-                conn.commit()
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(error_summary, safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        with _db.open_db(state_path) as conn:
-            _events_log.record(
-                conn,
-                kind="catalog.refreshed",
-                summary=f"catalog refreshed from withcache ({len(cat.entries)} entries)",
-                subject_kind="catalog",
-                subject_id=cat.withcache_url or "",
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"entry_count": len(cat.entries)},
-            )
-            conn.commit()
-        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
-
-    # ----- ramboot pre-warm (per-image action buttons) --------------------
-
-    @app.post(
-        "/ui/images/{ref}/prewarm",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_image_prewarm(ref: str, request: Request) -> RedirectResponse:
-        """Enqueue an nbdmux warm for one catalog ref.
-
-        Looks up the ``catalog_entries`` row by ``bty_image_ref`` for
-        its src URL + format hint, resolves the configured nbdmux
-        URL, then POSTs to nbdmux ``/exports`` via
-        :func:`nbdmux.client.warm_export`. The row's Warm column
-        picks up the resulting queued / fetching / decompressing /
-        ready state on the next page render (the shared list_exports
-        poll in ``_render_images_page``). Errors surface as
-        ``?error=`` on the /ui/images redirect and land in the
-        events log as ``ramboot.prewarm.failed``.
-        """
-        entry = request.app.state.withcache_catalog.get_by_ref(ref)
-        if entry is None:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"unknown ref: {ref}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        row = {"src": entry.get("src"), "name": entry.get("name"), "format": entry.get("format")}
-        with _db.open_db(state_path) as conn:
-            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
-        if not nbdmux_url:
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote("nbdmux not configured (Settings > Ramboot)", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        try:
-            nbdmux_client.warm_export(
-                name=ref,
-                src_url=row["src"],
-                format_hint=row["format"] or None,
-                server=nbdmux_url,
-                timeout=5.0,
-            )
-        except nbdmux_client.NbdmuxError as exc:
-            with _db.open_db(state_path) as conn:
-                _events_log.record(
-                    conn,
-                    kind="ramboot.prewarm.failed",
-                    summary=f"prewarm failed: {row['name']}: {exc}",
-                    subject_kind="catalog",
-                    subject_id=row["src"],
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={"ref": ref, "error": str(exc)},
-                )
-                conn.commit()
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"prewarm failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        with _db.open_db(state_path) as conn:
-            _events_log.record(
-                conn,
-                kind="ramboot.prewarm.requested",
-                summary=f"prewarm requested: {row['name']}",
-                subject_kind="catalog",
-                subject_id=row["src"],
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"ref": ref, "src": row["src"]},
-            )
-            conn.commit()
-        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
-
-    @app.post(
-        "/ui/images/{ref}/unwarm",
-        include_in_schema=False,
-        dependencies=[Depends(require_ui_auth)],
-    )
-    def ui_image_unwarm(ref: str, request: Request) -> RedirectResponse:
-        """Delete an nbdmux export for one catalog ref.
-
-        Idempotent: nbdmux returns 404 for an unknown export name,
-        which :func:`nbdmux.client.remove_export` treats as no-op.
-        Only transport / server failures surface as ``?error=``.
-
-        The audit event carries ``subject_id=<catalog src>`` to
-        stay symmetric with ``ramboot.prewarm.requested`` /
-        ``.failed`` so a /ui/events filter on one src URL surfaces
-        the full lifecycle; the src is looked up from withcache's
-        catalog when the entry still exists (a prior-DELETE from
-        withcache leaves it gone, in which case the event falls
-        back to the ref so the audit trail still lands).
-        """
-        entry = request.app.state.withcache_catalog.get_by_ref(ref)
-        src_for_audit = entry.get("src") if entry else ref
-        with _db.open_db(state_path) as conn:
-            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
-        if not nbdmux_url:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote("nbdmux not configured", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        try:
-            nbdmux_client.remove_export(name=ref, server=nbdmux_url, timeout=5.0)
-        except nbdmux_client.NbdmuxError as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"unwarm failed: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        with _db.open_db(state_path) as conn:
-            _events_log.record(
-                conn,
-                kind="ramboot.prewarm.removed",
-                summary=f"prewarm removed: {ref}",
-                subject_kind="catalog",
-                subject_id=src_for_audit,
-                actor="operator",
-                source_ip=_client_ip(request),
-                details={"ref": ref, "src": src_for_audit},
-            )
-            conn.commit()
-        return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- boot artifacts ------------------------------------------------
 
@@ -1503,10 +1127,8 @@ def register_ui_routes(
         with _db.open_db(state_path) as conn:
             netboot_repo = _settings_store.resolve_netboot_repo(conn)
             netboot_tag = _settings_store.resolve_netboot_tag(conn)
-            catalog_url = _settings_store.resolve_catalog_url(conn)
             netboot_repo_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
             netboot_tag_override = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
-            catalog_url_override = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
             display_timezone_override = _settings_store.get(conn, _settings_store.KEY_DISPLAY_TZ)
             try:
                 display_timezone_effective = str(_settings_store.resolve_display_timezone(conn))
@@ -1543,10 +1165,8 @@ def register_ui_routes(
             "netboot_tag": netboot_tag,
             "netboot_tag_override": netboot_tag_override,
             "netboot_tag_default": _settings_store.DEFAULT_TAG,
-            "catalog_url": catalog_url,
-            "catalog_url_override": catalog_url_override,
-            "catalog_url_default": _settings_store.DEFAULT_CATALOG_URL,
         }
+        withcache_ctx = {"url": request.app.state.withcache_catalog.withcache_url or ""}
         config_groups = [
             {
                 "title": "Identity",
@@ -1677,6 +1297,7 @@ def register_ui_routes(
             flash=flash,
             flash_kind=flash_kind,
             upstream=upstream,
+            withcache=withcache_ctx,
             config_groups=config_groups,
             interfaces=interfaces,
             primary=primary,
@@ -1901,29 +1522,25 @@ def register_ui_routes(
         request: Request,
         netboot_repo: Annotated[str, Form()] = "",
         netboot_tag: Annotated[str, Form()] = "",
-        catalog_url: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
-        """Save (or clear) the three editable upstream overrides:
-        netboot repo, netboot release tag, and the catalog URL. An
-        empty field clears that override, reverting to the built-in
-        default. All three take effect on the next fetch without a
-        restart, since the fetch sites resolve from this store at
-        request time.
+        """Save (or clear) the two editable upstream overrides:
+        netboot repo + netboot release tag. An empty field clears
+        that override, reverting to the built-in default. Both
+        take effect on the next fetch without a restart, since the
+        fetch sites resolve from this store at request time.
+
+        (The catalog URL override lived here until v0.66.1 when
+        the catalog moved to withcache; that knob now lives on
+        withcache's /ui/catalog.)
         """
         nr = netboot_repo.strip()
         nt = netboot_tag.strip()
-        cu = catalog_url.strip()
         with _db.open_db(state_path) as conn:
-            # Snapshot the previous explicit overrides (None = was on
-            # default) BEFORE the writes so the audit event can carry
-            # both before + after.
             old_nr = _settings_store.get(conn, _settings_store.KEY_NETBOOT_REPO)
             old_nt = _settings_store.get(conn, _settings_store.KEY_NETBOOT_TAG)
-            old_cu = _settings_store.get(conn, _settings_store.KEY_CATALOG_URL)
             for value, key in (
                 (nr, _settings_store.KEY_NETBOOT_REPO),
                 (nt, _settings_store.KEY_NETBOOT_TAG),
-                (cu, _settings_store.KEY_CATALOG_URL),
             ):
                 if value:
                     _settings_store.set_value(conn, key, value)
@@ -1934,8 +1551,7 @@ def register_ui_routes(
                 kind="settings.upstream.updated",
                 summary=(
                     f"upstream sources set: netboot_repo={nr or '(default)'}, "
-                    f"netboot_tag={nt or '(default)'}, "
-                    f"catalog_url={cu or '(default)'}"
+                    f"netboot_tag={nt or '(default)'}"
                 ),
                 subject_kind="settings",
                 subject_id="upstream",
@@ -1944,7 +1560,6 @@ def register_ui_routes(
                 details={
                     "netboot_repo": {"old": old_nr, "new": nr or None},
                     "netboot_tag": {"old": old_nt, "new": nt or None},
-                    "catalog_url": {"old": old_cu, "new": cu or None},
                 },
             )
             conn.commit()

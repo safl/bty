@@ -583,7 +583,7 @@ def test_subnav_pill_keys_match_route_validator_whitelist() -> None:
 
     drifts = [
         f"{tmpl} renders pill ``{key}`` but no _ui.py validator whitelists it"
-        for tmpl in ("netboot.html", "images.html", "machines.html")
+        for tmpl in ("netboot.html", "machines.html")
         for key in _pill_keys(tmpl)
         if key not in validator_keys
     ]
@@ -606,7 +606,6 @@ def test_every_ui_page_uses_the_intro_box_partial() -> None:
     pages = (
         "dashboard.html",
         "machines.html",
-        "images.html",
         "netboot.html",
         "events.html",
         "settings.html",
