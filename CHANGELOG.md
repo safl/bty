@@ -9,6 +9,42 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.67.0] - 2026-07-06
+
+### Breaking
+
+The `/ui/images` route is gone. The image catalog is single-sourced
+from withcache (as of v0.66.0) and ramboot warming lives on nbdmux's
+`/ui/exports`; the residual bty-side Images page was a redundant
+window onto data another service already served. The top-nav Images
+entry, the dashboard Images tile, per-row Pre-warm / Unwarm / Check
+actions, the Sync-from-withcache handler, the Catalog URL card on
+`/ui/settings`, and the `POST /ui/catalog/refresh` /
+`POST /ui/catalog/entries/check` / `POST /ui/images/{ref}/prewarm` /
+`POST /ui/images/{ref}/unwarm` handlers all went with it. Operators
+manage the catalog on withcache's `/ui/catalog` and pick what to
+export on nbdmux's `/ui/exports`; bty is machine-binding only.
+
+`PUT /machines` refuses a `bty-flash-*` / `ramboot` bind against a
+catalog entry that withcache hasn't downloaded (`downloaded_at`
+unset). This pairs with withcache's own retirement of auto-fetch on
+`/b/<url>` misses: an undownloaded entry would just 404 at PXE-chain
+time, so bty catches it at bind-time and points the operator at the
+withcache Download button. Refs outside the catalog fall through
+unchanged.
+
+Ramboot readiness matches nbdmux exports by `src_url` rather than
+`bty_image_ref` (nbdmux PR #33 renamed exports to URL basename). The
+plan-time render looks up the ready export's actual `name` and
+passes it as `export_name` to the ramboot iPXE template, so
+`bty.image=<name>` on the initramfs cmdline lines up with what
+`nbd-client -name` will find on nbdmux. The ref-based match survives
+as a legacy fallback.
+
+The machine picker on `/ui/machines/{mac}` disables catalog entries
+whose bytes withcache hasn't downloaded, with a "not downloaded on
+withcache" hint pointing at the Download button.
+
 ## [0.65.17] - 2026-07-04
 
 ### Added
