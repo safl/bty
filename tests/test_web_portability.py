@@ -22,24 +22,9 @@ from bty.web import _db, _portability
 def _seed(state_path: Path) -> None:
     _db.init_db(state_path)
     with _db.open_db(state_path) as conn:
-        # The slim format intentionally drops catalog_entries on export
-        # and bindings on the machine row -- but the source DB still
-        # has them. We're testing that they DON'T travel.
-        conn.execute(
-            "INSERT INTO catalog_entries (bty_image_ref, src, disk_image_sha, name, "
-            "sha_url, format, size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                "ref-demo",
-                "file://demo.img",
-                "sha-demo",
-                "demo.img",
-                None,
-                "img",
-                64,
-                None,
-                "2026-05-22T00:00:00+00:00",
-            ),
-        )
+        # The slim format intentionally drops bindings on the
+        # machine row -- but the source DB still has them.
+        # We're testing that they DON'T travel.
         conn.execute(
             "INSERT INTO machines (mac, bty_image_ref, boot_mode, sanboot_drive, "
             "saw_flasher_boot, known_disks, known_disks_at, hw_lshw, hw_lshw_at, "
@@ -104,7 +89,7 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
         "last_flashed_at",
     ):
         assert forbidden not in machine, f"slim format must not export {forbidden}"
-    # No catalog_entries section.
+    # Slim format doesn't carry catalog data (withcache owns it).
     assert "catalog_entries" not in inventory
     # CRITICALLY: no files/ subdir. v3 is metadata-only.
     assert not (bundle / "files").exists(), (
@@ -129,7 +114,6 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
         m = dict(
             conn.execute("SELECT * FROM machines WHERE mac=?", ("aa:bb:cc:dd:ee:ff",)).fetchone()
         )
-        c_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
         dst_labels = [
             r[0]
             for r in conn.execute(
@@ -149,9 +133,7 @@ def test_export_import_round_trip(tmp_path: Path) -> None:
     assert m["boot_mode"] == "bty-inventory"
     assert m["saw_flasher_boot"] == 0
     assert m["last_flashed_at"] is None
-    # Catalog rows are NOT imported -- re-import the catalog on the
-    # new appliance.
-    assert c_count == 0
+    # Catalog data lives in withcache; the bundle never carried it.
 
 
 def test_import_rejects_unknown_bundle_version(tmp_path: Path) -> None:

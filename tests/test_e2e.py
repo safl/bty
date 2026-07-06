@@ -97,6 +97,38 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
             AUTH.clear()
 
 
+def _seed_catalog(
+    app_client: TestClient,
+    src: str,
+    *,
+    sha256: str | None = None,
+    resolved_src: str | None = None,
+    format: str | None = "img.gz",
+    size_bytes: int | None = 0,
+    name: str | None = None,
+) -> str:
+    """Seed one catalog entry via ``app.state.withcache_catalog`` and
+    return its ``bty_image_ref``. Post-cutover replacement for the
+    pre-v0.66.0 direct-SQL INSERT into ``catalog_entries``."""
+    from urllib.parse import urlparse
+
+    ref = _catalog.image_ref_for_src(src)
+    if name is None:
+        name = Path(urlparse(src).path).name or Path(src).name or "image.img.gz"
+    entry: dict[str, object] = {"name": name, "src": src}
+    entry["resolved_src"] = resolved_src or src
+    if sha256:
+        entry["sha256"] = sha256
+    if format:
+        entry["format"] = format
+    if size_bytes is not None:
+        entry["size_bytes"] = size_bytes
+    existing = list(app_client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
+    existing.append(entry)
+    app_client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]
+    return ref
+
+
 # ----------------------------------------------------------------------
 # 1. /catalog.toml -> probe_image_url with production-shaped entries
 # ----------------------------------------------------------------------
@@ -149,13 +181,33 @@ def test_e2e_real_default_catalog_round_trips_through_probe_url(
         b'sha256 = "' + b"c" * 64 + b'"\n'
         b'format = "img.gz"\n'
     )
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", body, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
+    # Seed the withcache-catalog cache directly (the /ui/catalog/upload
+    # route was removed in v0.66.0; withcache owns the catalog).
+    del body
+    entries = [
+        {
+            "name": "nosi debian-sysdev (x86_64, rolling)",
+            "src": "https://example.invalid/debian",
+            "resolved_src": "https://example.invalid/debian",
+            "format": "img.gz",
+            "sha256": "a" * 64,
+        },
+        {
+            "name": "nosi fedora-sysdev (x86_64, rolling)",
+            "src": "https://example.invalid/fedora",
+            "resolved_src": "https://example.invalid/fedora",
+            "format": "img.gz",
+            "sha256": "b" * 64,
+        },
+        {
+            "name": "bty-server (x86_64, latest)",
+            "src": "https://example.invalid/bty-server",
+            "resolved_src": "https://example.invalid/bty-server",
+            "format": "img.gz",
+            "sha256": "c" * 64,
+        },
+    ]
+    app_client.app.state.withcache_catalog._seed_for_tests(entries)  # type: ignore[attr-defined]
 
     # Fetch back the rendered catalog.
     r = app_client.get("/catalog.toml")
@@ -296,27 +348,16 @@ def test_e2e_pxe_flash_chain_plan_carries_image_url_and_target_serial(
     # the file). Insert the catalog row by hand. ``bty_image_ref``
     # has the same shape the auto-import would produce
     # (``image_ref_for_src("file://demo.qcow2")``).
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+
     bty_image_ref = _catalog.image_ref_for_src("file://demo.qcow2")
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, "
-            "sha_url, format, size_bytes, description, added_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                bty_image_ref,
-                "file://demo.qcow2",
-                sha,
-                "demo.qcow2",
-                None,
-                "qcow2",
-                len(payload),
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    _seed_catalog(
+        app_client,
+        "file://demo.qcow2",
+        name="demo.qcow2",
+        sha256=sha,
+        format="qcow2",
+        size_bytes=len(payload),
+    )
 
     # Bind the machine to that ref.
     r = app_client.put(
@@ -382,27 +423,14 @@ def test_e2e_plan_handles_extensionless_oras_name(app_client: TestClient) -> Non
     plan ships the raw oras:// URL (the live env's bty handles
     OCI via withcache.oras) and the ``format`` field is the
     authoritative format hint."""
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
-    bty_image_ref = _catalog.image_ref_for_src(src)
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, sha_url, format, "
-            "size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                bty_image_ref,
-                src,
-                None,
-                "nosi fedora-sysdev (x86_64, rolling)",  # no extension
-                None,
-                "img.gz",
-                None,
-                None,
-                "2026-05-22T00:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    bty_image_ref = _seed_catalog(
+        app_client,
+        src,
+        name="nosi fedora-sysdev (x86_64, rolling)",  # no extension
+        format="img.gz",
+        size_bytes=None,
+    )
     r = app_client.put(
         "/machines/0c:bf:b4:c0:4b:42",
         json={
@@ -427,29 +455,17 @@ def _seed_flashable_machine(app_client: TestClient, mac: str) -> None:
     """Seed a catalog entry + bind ``mac`` as bty-flash-always with a
     target disk serial -- the minimum for the flash chain to render."""
     image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     payload = b"\0" * 256
     (image_root / "demo.qcow2").write_bytes(payload)
     sha = hashlib.sha256(payload).hexdigest()
-    bty_image_ref = _catalog.image_ref_for_src("file://demo.qcow2")
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, sha_url, format, "
-            "size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                bty_image_ref,
-                "file://demo.qcow2",
-                sha,
-                "demo.qcow2",
-                None,
-                "qcow2",
-                len(payload),
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    bty_image_ref = _seed_catalog(
+        app_client,
+        "file://demo.qcow2",
+        sha256=sha,
+        name="demo.qcow2",
+        format="qcow2",
+        size_bytes=len(payload),
+    )
     r = app_client.put(
         f"/machines/{mac}",
         json={
@@ -742,85 +758,6 @@ def test_e2e_boot_artifact_route_supports_head_with_correct_content_length(
 # ----------------------------------------------------------------------
 
 
-def test_e2e_catalog_entry_lifecycle_via_ui_endpoints(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Full lifecycle of a URL-form-added catalog entry:
-
-      1. POST /ui/catalog/entries with image_url -> 303 to /ui/images
-      2. GET /ui/images -> entry appears, trash button present
-      3. DELETE /catalog/entries?src=... -> 204
-      4. GET /ui/images -> entry gone
-
-    Catches: the entry shows up where the operator expects it (so
-    the delete button can be found), AND the delete actually removes
-    the row.
-    """
-    from bty.web import _helpers
-
-    monkeypatch.setattr(_helpers, "head_content_length", lambda _url: None)
-
-    src = "https://example.invalid/rolling.img.gz"
-    r = app_client.post(
-        "/ui/catalog/entries",
-        data={"image_url": src, "sha_url": ""},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
-
-    r = app_client.get("/ui/images", cookies=AUTH)
-    assert r.status_code == 200, r.text
-    assert "rolling.img.gz" in r.text
-    assert "bty-catalog-entry-delete-btn" in r.text
-
-    # Sanity-check the DB has the row.
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
-    with _bty_db.open_db(state_path) as conn:
-        rows = conn.execute("SELECT src FROM catalog_entries WHERE src = ?", (src,)).fetchall()
-    assert rows, "POST /ui/catalog/entries did not insert the row"
-
-    # Use httpx's url= form to pass the query string explicitly
-    # (params= via .request() sometimes urlencodes the dict keys
-    # in surprising ways).
-    from urllib.parse import quote as _q
-
-    r = app_client.request(
-        "DELETE",
-        f"/catalog/entries?src={_q(src, safe='')}",
-        cookies=AUTH,
-    )
-    assert r.status_code == 204, r.text
-
-    with _bty_db.open_db(state_path) as conn:
-        rows_after = conn.execute(
-            "SELECT src FROM catalog_entries WHERE src = ?", (src,)
-        ).fetchall()
-    assert not rows_after, (
-        f"DELETE returned 204 but the row is still in catalog_entries: {rows_after}"
-    )
-
-    r = app_client.get("/ui/images", cookies=AUTH)
-    # ``rolling.img.gz`` will still appear in the events audit log
-    # at the bottom of /ui/images (audit is append-only, correctly).
-    # The contract under test is that the IMAGES table no longer
-    # carries it -- so the delete button (which only renders on
-    # image rows referencing this entry) must be gone.
-    page = r.text
-    # Find the catalog-entry-delete-btn instances and assert none
-    # carry our deleted src as their data-src attribute.
-    import re
-
-    btns_with_our_src = re.findall(
-        r'bty-catalog-entry-delete-btn[^>]*data-src="' + re.escape(src) + r'"',
-        page,
-    )
-    assert not btns_with_our_src, (
-        f"DELETE removed the DB row but the entry's delete button is still "
-        f"rendered: {btns_with_our_src!r}. Auto-import re-adding it?"
-    )
-
-
 # ----------------------------------------------------------------------
 # 7. format_hint propagates through make_plan + validate_plan
 # ----------------------------------------------------------------------
@@ -901,27 +838,15 @@ def test_e2e_pxe_done_failure_is_isolated_from_machine_state(
     sha = hashlib.sha256(payload).hexdigest()
     (image_root / "tiny.img.sha256").write_text(f"{sha}  tiny.img\n")
 
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     ref = _catalog.image_ref_for_src("file://tiny.img")
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, "
-            "sha_url, format, size_bytes, description, added_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                ref,
-                "file://tiny.img",
-                sha,
-                "tiny.img",
-                None,
-                "img",
-                len(payload),
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    _seed_catalog(
+        app_client,
+        "file://tiny.img",
+        name="tiny.img",
+        sha256=sha,
+        format="img",
+        size_bytes=len(payload),
+    )
     r = app_client.put(
         "/machines/12:34:56:78:9a:bc",
         json={
@@ -1061,27 +986,15 @@ def test_e2e_pxe_unknown_mac_then_inventory_then_flash_chain(
     sha = hashlib.sha256(payload).hexdigest()
     (image_root / "bound.img.gz.sha256").write_text(f"{sha}  bound.img.gz\n")
 
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
     ref = _catalog.image_ref_for_src("file://bound.img.gz")
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, "
-            "sha_url, format, size_bytes, description, added_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                ref,
-                "file://bound.img.gz",
-                sha,
-                "bound.img.gz",
-                None,
-                "img.gz",
-                len(payload),
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    _seed_catalog(
+        app_client,
+        "file://bound.img.gz",
+        name="bound.img.gz",
+        sha256=sha,
+        format="img.gz",
+        size_bytes=len(payload),
+    )
 
     r = app_client.put(
         f"/machines/{mac}",
@@ -1144,26 +1057,14 @@ def test_e2e_flash_safety_gate_no_target_disk_serial_surfaces_reason(
     (image_root / "gated.img.gz").write_bytes(payload)
     sha = hashlib.sha256(payload).hexdigest()
     (image_root / "gated.img.gz.sha256").write_text(f"{sha}  gated.img.gz\n")
-    ref = _catalog.image_ref_for_src("file://gated.img.gz")
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, sha_url, "
-            "format, size_bytes, description, added_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                ref,
-                "file://gated.img.gz",
-                sha,
-                "gated.img.gz",
-                None,
-                "img.gz",
-                len(payload),
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    ref = _seed_catalog(
+        app_client,
+        "file://gated.img.gz",
+        sha256=sha,
+        name="gated.img.gz",
+        format="img.gz",
+        size_bytes=len(payload),
+    )
 
     # Bind without target_disk_serial.
     r = app_client.put(
@@ -1196,53 +1097,6 @@ def test_e2e_flash_safety_gate_no_target_disk_serial_surfaces_reason(
     )
 
 
-def test_e2e_catalog_upload_invalid_toml_preserves_existing_manifest(
-    app_client: TestClient,
-) -> None:
-    """``POST /ui/catalog/upload`` validates the body before writing.
-    A malformed TOML must:
-      1. Return 303 to ``/ui/images?error=...`` (not 500).
-      2. NOT clobber the existing manifest_path file (the operator's
-         existing catalog is preserved).
-    """
-    # First upload a valid catalog so there's an existing manifest
-    # to potentially clobber.
-    good = (
-        b"version = 1\n"
-        b"\n"
-        b'[[images]]\nname = "Good"\n'
-        b'src = "https://example.invalid/good"\n'
-        b'sha256 = "' + b"e" * 64 + b'"\n'
-        b'format = "img.gz"\n'
-    )
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", good, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
-
-    # Now upload garbage.
-    garbage = b"this is not valid TOML [[[\nname missing\n"
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", garbage, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error="), r.headers["location"]
-
-    # The existing manifest must still parse + show the Good entry.
-    r = app_client.get("/catalog.toml")
-    assert r.status_code == 200, r.text
-    parsed = _catalog.load_bytes(r.content, source="<e2e>")
-    assert any(e.name == "Good" for e in parsed.entries), (
-        f"Bad upload clobbered the existing catalog. Entries: {parsed.entries!r}"
-    )
-
-
 def test_e2e_machine_put_is_full_replace_not_partial_update(
     app_client: TestClient,
 ) -> None:
@@ -1257,31 +1111,19 @@ def test_e2e_machine_put_is_full_replace_not_partial_update(
     bindings when editing labels / other unrelated fields.
     """
     mac = "44:44:44:44:44:44"
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+
     image_root: Path = app_client.app.state.image_root  # type: ignore[attr-defined]
     (image_root / "stable.img.gz").write_bytes(b"x" * 256)
     sha = hashlib.sha256(b"x" * 256).hexdigest()
     (image_root / "stable.img.gz.sha256").write_text(f"{sha}  stable.img.gz\n")
-    ref = _catalog.image_ref_for_src("file://stable.img.gz")
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, sha_url, "
-            "format, size_bytes, description, added_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                ref,
-                "file://stable.img.gz",
-                sha,
-                "stable.img.gz",
-                None,
-                "img.gz",
-                256,
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    ref = _seed_catalog(
+        app_client,
+        "file://stable.img.gz",
+        sha256=sha,
+        name="stable.img.gz",
+        format="img.gz",
+        size_bytes=256,
+    )
 
     # Initial bind with everything.
     r = app_client.put(
@@ -1481,28 +1323,12 @@ def test_e2e_get_images_surfaces_ref_derivable_from_src(
     re-uses the ref on a subsequent write expects the server's
     canonicalisation to be deterministic.
     """
-    state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
+
     src = "https://example.invalid/json-listing"
     expected_ref = _catalog.image_ref_for_src(src)
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, "
-            "sha_url, format, size_bytes, description, added_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                expected_ref,
-                src,
-                "2" * 64,
-                "Json Listing Entry",
-                None,
-                "img.gz",
-                100,
-                None,
-                "2026-05-17T22:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    _seed_catalog(
+        app_client, src, name="Json Listing Entry", sha256="2" * 64, format="img.gz", size_bytes=100
+    )
 
     r = app_client.get("/images", cookies=AUTH)
     assert r.status_code == 200, r.text
@@ -1518,113 +1344,3 @@ def test_e2e_get_images_surfaces_ref_derivable_from_src(
     import re as _re
 
     assert _re.fullmatch(r"[0-9a-f]{64}", row["ref"]), row["ref"]
-
-
-def test_e2e_catalog_entry_add_rejects_mismatched_ref(
-    app_client: TestClient,
-) -> None:
-    """Trust-but-verify: ``POST /catalog/entries`` accepts an
-    optional ``ref`` field. When supplied, the server recomputes
-    ``image_ref_for_src(image_url)`` and rejects mismatches with
-    422 + an operator-actionable error string naming both the
-    supplied and expected refs.
-
-    Catches: a client that read a ref from /images and forgot to
-    update it after the operator changed the URL, OR a producer
-    whose canonicalisation differs from the server's. Either way,
-    the binding would be wrong -- 422 surfaces the disagreement
-    before a row lands.
-    """
-    image_url = "https://example.invalid/ref-verify"
-    wrong_ref = "0" * 64
-
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": image_url, "sha_url": None, "ref": wrong_ref},
-        cookies=AUTH,
-    )
-    assert r.status_code == 422, r.text
-    body = r.json()["detail"]
-    assert "ref mismatch" in body, body
-    assert wrong_ref in body, body
-    # Computed ref must also appear so the operator can verify
-    # client-side what the server expected.
-    expected = _catalog.image_ref_for_src(image_url)
-    assert expected in body, body
-
-
-def test_e2e_catalog_entry_add_accepts_matching_ref(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The happy path of trust-but-verify: supplying the correct
-    ref alongside the URL accepts. The ref is optional; this
-    test asserts the verification path doesn't reject a legit
-    client.
-    """
-    from bty.web import _helpers
-
-    monkeypatch.setattr(_helpers, "head_content_length", lambda _url: None)
-    image_url = "https://example.invalid/ref-ok"
-    right_ref = _catalog.image_ref_for_src(image_url)
-
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": image_url, "sha_url": None, "ref": right_ref},
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    assert r.json()["bty_image_ref"] == right_ref
-
-
-def test_e2e_catalog_load_bytes_verifies_inbound_ref_field(
-    tmp_path: Path,
-) -> None:
-    """The TOML schema accepts an optional ``ref`` per entry. On
-    parse, ``CatalogEntry.from_dict`` recomputes the ref from
-    ``src`` and raises ``CatalogError`` on mismatch -- the same
-    trust-but-verify pattern applied at the catalog-loader
-    boundary so an imported catalog can carry refs.
-    """
-    src = "https://example.invalid/loader-verify"
-    expected = _catalog.image_ref_for_src(src)
-    # Matching ref: OK.
-    body = (
-        b"version = 1\n"
-        b'[[images]]\nname = "ok"\nsrc = "' + src.encode() + b'"\n'
-        b'ref = "' + expected.encode() + b'"\n'
-        b'sha256 = "' + b"a" * 64 + b'"\n'
-        b'format = "img.gz"\n'
-    )
-    parsed = _catalog.load_bytes(body, source="<test>")
-    assert parsed.entries[0].ref == expected
-
-    # Mismatched ref: rejected.
-    bad = body.replace(expected.encode(), (b"0" * 64))
-    with pytest.raises(_catalog.CatalogError) as exc_info:
-        _catalog.load_bytes(bad, source="<test>")
-    assert "mismatch" in str(exc_info.value)
-
-
-def test_e2e_catalog_entry_ref_property_always_equals_image_ref_for_src() -> None:
-    """``CatalogEntry.ref`` is a property derived from
-    ``image_ref_for_src(src)`` -- not a stored field. Pin the
-    invariant across a spread of src shapes (http, oras, file).
-
-    A future refactor that stores ref as a separate field must
-    keep this property contract -- the test asserts the value
-    matches the function regardless of how it's implemented.
-    """
-    for src in (
-        "https://example.com/foo.img.gz",
-        "http://server/path/to/img",
-        "oras://ghcr.io/owner/repo:tag",
-        "file://relative/path.qcow2",
-    ):
-        entry = _catalog.CatalogEntry(
-            name="x",
-            src=src,
-            sha256=None,
-            format="img.gz",
-        )
-        assert entry.ref == _catalog.image_ref_for_src(src)

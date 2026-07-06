@@ -107,57 +107,6 @@ def test_fetch_routes_accept_head() -> None:
 
 
 # ----------------------------------------------------------------------
-# 2. Every DELETE catalog endpoint has a UI button
-# ----------------------------------------------------------------------
-
-
-def test_delete_catalog_endpoints_have_ui_surface() -> None:
-    """``DELETE /catalog/...`` API endpoints exist for cache eviction
-    + entry deletion; both must have a button in ``/ui/images.html``.
-    v0.20.9 fixed a gap where ``DELETE /catalog/cache/{name}`` had
-    no UI button -- operators had to curl from the shell.
-
-    Heuristic: every ``@app.delete("/catalog/...")`` route in
-    bty-web's ``_app.py`` OR any ``_routes_*.py`` sibling must have
-    at least one corresponding action in the JS handler in
-    ``images.html`` (fetch with method DELETE targeting the same
-    path prefix).
-    """
-    web_dir = REPO_ROOT / "src" / "bty" / "web"
-    src_files = [web_dir / "_app.py", *sorted(web_dir.glob("_routes_*.py"))]
-    src = "\n".join(p.read_text() for p in src_files)
-    template = (REPO_ROOT / "src" / "bty" / "web" / "_templates" / "ui" / "images.html").read_text()
-
-    # Collect @app.delete("/catalog/...") paths.
-    delete_paths: list[str] = []
-    for m in re.finditer(r'@app\.delete\(\s*"(/catalog/[^"]+)"', src):
-        path = m.group(1)
-        # Strip path params for substring matching against the
-        # template (the template builds URLs by concatenating
-        # encodeURIComponent(name) onto a base prefix).
-        prefix = re.sub(r"/\{[^}]+\}", "/", path).rstrip("/")
-        delete_paths.append(prefix)
-
-    assert delete_paths, "no @app.delete /catalog/* routes found in _app.py or _routes_*.py"
-
-    missing = []
-    for prefix in delete_paths:
-        # The JS handler hits the route via either
-        # ``fetch("<prefix>/" + encoded)`` (path-param style) or
-        # ``fetch("<prefix>?src=" + encoded)`` (query-param style;
-        # /catalog/entries uses this so the operator's literal src
-        # URL doesn't need URL-segment encoding tricks).
-        base = prefix.rstrip("/")
-        candidates = (base + '"', base + '/"', base + "?")
-        if not any(c in template for c in candidates):
-            missing.append(prefix)
-    assert not missing, (
-        f"DELETE catalog endpoints missing UI surface in images.html: "
-        f"{missing!r}. Add a button + JS handler hitting these endpoints."
-    )
-
-
-# ----------------------------------------------------------------------
 # 3. iPXE templates carry the same baseline cmdline tokens
 # ----------------------------------------------------------------------
 

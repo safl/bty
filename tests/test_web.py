@@ -11,7 +11,6 @@ explicitly attach it.
 
 from __future__ import annotations
 
-import typing
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -29,6 +28,41 @@ TEST_PASSWORD = "test-admin-pw"
 # ``cookies=AUTH`` (a dict like ``{"bty-token": "..."}``); requests
 # without the cookie hit the real auth dep and 401.
 AUTH: dict[str, str] = {}
+
+
+def _seed_catalog(
+    app_client: TestClient,
+    image_url: str,
+    *,
+    sha256: str | None = None,
+    resolved_src: str | None = None,
+    format: str | None = "img.gz",
+    size_bytes: int | None = 0,
+    name: str | None = None,
+) -> str:
+    """Seed one catalog entry via ``app.state.withcache_catalog`` and
+    return its ``bty_image_ref``. Replaces the pre-cutover pattern of
+    ``r = app_client.post("/catalog/entries", ...); ref = r.json()["bty_image_ref"]``
+    now that bty consumes withcache as the catalog source of truth."""
+    from urllib.parse import urlparse
+
+    from bty.catalog import image_ref_for_src
+
+    ref = image_ref_for_src(image_url)
+    if name is None:
+        name = Path(urlparse(image_url).path).name or "image.img.gz"
+    entry: dict[str, object] = {"name": name, "src": image_url}
+    entry["resolved_src"] = resolved_src or image_url
+    if sha256:
+        entry["sha256"] = sha256
+    if format:
+        entry["format"] = format
+    if size_bytes is not None:
+        entry["size_bytes"] = size_bytes
+    existing = list(app_client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
+    existing.append(entry)
+    app_client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]
+    return ref
 
 
 @pytest.fixture
@@ -638,17 +672,7 @@ def test_pxe_flash_policy_returns_chain_with_args(
         lambda *_a, **_kw: flash_sha,
     )
     image_url = "https://example.invalid/demo.img.gz"
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": image_url,
-            "sha_url": "https://example.invalid/demo.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    ref = r.json()["bty_image_ref"]
-    assert r.json()["disk_image_sha"] == flash_sha
+    ref = _seed_catalog(app_client, image_url, sha256=flash_sha)
 
     # boot_mode=flash still requires an explicit target_disk_serial
     # to route to the ipxe_flash.j2 template (vs the local-fallback);
@@ -749,16 +773,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
         "bty.catalog.fetch_sha256_for_url",
         lambda *_a, **_kw: flash_sha,
     )
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/demo.img.gz",
-            "sha_url": "https://example.invalid/demo.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    ref = r.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/demo.img.gz", sha256=flash_sha)
 
     mac = "aa:bb:cc:dd:ee:ff"
     app_client.put(
@@ -775,12 +790,7 @@ def test_pxe_plan_flash_policy_with_target_returns_auto(
     body = r.json()
     assert body["mode"] == "flash"
     assert body["target_disk_serial"] == "WD-WX12345"
-    # No withcache configured -> live env fetches direct from origin.
     assert body["image"] == "https://example.invalid/demo.img.gz"
-    # The CONTENT sha rides along so the live env verifies the bytes
-    # even though the origin URL doesn't embed the digest in its path.
-    # This is disk_image_sha (hash of the bytes), NOT bty_image_ref
-    # (ref = sha256 of the canonical URL, an identifier).
     assert body["disk_image_sha"] == flash_sha
     assert body["disk_image_sha"] != ref
 
@@ -808,16 +818,7 @@ def test_pxe_plan_flash_uses_withcache_url_when_blob_is_cached(
     # Force is_cached -> True without setting up a stub server.
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)
 
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/demo.img.gz",
-            "sha_url": "https://example.invalid/demo.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    ref = r.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/demo.img.gz")
 
     mac = "aa:bb:cc:dd:ee:c0"
     app_client.put(
@@ -867,16 +868,7 @@ def test_pxe_plan_flash_records_origin_when_withcache_misses(
     monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: False)  # cold
 
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/cold.img.gz",
-            "sha_url": "https://example.invalid/cold.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    ref = r.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/cold.img.gz")
     mac = "aa:bb:cc:dd:ee:c1"
     app_client.put(
         f"/machines/{mac}",
@@ -921,16 +913,7 @@ def test_pxe_plan_flash_uses_warm_withcache_even_when_resolved_src_null(
     monkeypatch.setenv(_settings_store.ENV_WITHCACHE_URL, "http://cache.invalid:8081")
     monkeypatch.setattr(_withcache, "is_cached", lambda *_a, **_kw: True)  # warm
 
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/nullres.img.gz",
-            "sha_url": "https://example.invalid/nullres.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    ref = r.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/nullres.img.gz")
 
     # Simulate an entry whose import never populated resolved_src.
     state_path: Path = app_client.app.state.state_path  # type: ignore[attr-defined]
@@ -1009,22 +992,20 @@ def test_catalog_toml_rewrites_srcs_through_withcache_when_configured(
 
     https_src = "https://example.invalid/demo.img.gz"
     oras_src = "oras://ghcr.io/owner/repo:tag"
-    # The /catalog.toml manifest schema requires sha256, so the https
-    # entry needs a sha_url to populate it (oras gets a digest from
-    # the manifest dance).
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": https_src, "sha_url": https_src + ".sha256"},
-        cookies=AUTH,
+    # Seed both entries in the withcache-catalog cache. The manifest
+    # schema requires sha256 (so /catalog.toml can emit them); the
+    # https entry uses the mocked fetch_sha256_for_url value, and the
+    # oras entry gets its digest from the stubbed resolve_ref above.
+    _seed_catalog(app_client, https_src, sha256="f" * 64)
+    _seed_catalog(
+        app_client,
+        oras_src,
+        sha256="d" * 64,
+        resolved_src="https://ghcr.io/v2/owner/repo/blobs/sha256:dead",
     )
-    assert r.status_code == 201, r.text
-    r = app_client.post("/catalog/entries", json={"image_url": oras_src}, cookies=AUTH)
-    assert r.status_code == 201, r.text
-
     # Sanity: both entries should be present before the rewrite check
     # (a silent dedup at the listing layer would mask a real bug).
-    entries = app_client.get("/catalog/entries", cookies=AUTH).json()
-    seen_src = {e["src"] for e in entries}
+    seen_src = {e["src"] for e in app_client.app.state.withcache_catalog.entries}  # type: ignore[attr-defined]
     assert {https_src, oras_src}.issubset(seen_src), seen_src
 
     body = app_client.get("/catalog.toml").content.decode()
@@ -2354,16 +2335,7 @@ def test_pxe_flash_refuses_chain_surfaces_reason_on_offered_event(
         lambda *_a, **_kw: _MockResp(b"", {"Content-Length": "0"}),
     )
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
-    add = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/safe.img.gz",
-            "sha_url": "https://example.invalid/safe.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert add.status_code == 201
-    ref = add.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/safe.img.gz", sha256=flash_sha)
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:dd",
         json={"bty_image_ref": ref, "boot_mode": "bty-flash-always"},
@@ -2517,16 +2489,7 @@ def test_pxe_plan_flash_chain_carries_target_disk_serial(
         lambda *_a, **_kw: _MockResp(b"", {"Content-Length": "0"}),
     )
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
-    add = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/img.img.gz",
-            "sha_url": "https://example.invalid/img.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert add.status_code == 201
-    ref = add.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/img.img.gz", sha256=flash_sha)
     app_client.put(
         "/machines/aa:bb:cc:dd:ee:f6",
         json={
@@ -3016,96 +2979,6 @@ def test_events_filter_by_source_ip(app_client: TestClient) -> None:
     assert all(e["source_ip"] == "testclient" for e in events)
 
 
-def test_catalog_entry_add_sha_failure_logs_event(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """When ``POST /catalog/entries`` is given an image_url +
-    sha_url and the sha resolution fails (CatalogError from
-    bty.catalog.fetch_sha256_for_url), a
-    ``catalog.entry.add.failed`` event lands in the audit log
-    instead of just a bare 400 response."""
-    from bty import catalog as _catalog
-
-    def boom(*_a: object, **_kw: object) -> str:
-        raise _catalog.CatalogError("upstream gave 404")
-
-    monkeypatch.setattr(_catalog, "fetch_sha256_for_url", boom)
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.com/foo.img.gz",
-            "sha_url": "https://example.com/foo.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 400
-    r = app_client.get("/events", params={"kind": "catalog.entry.add.failed"}, cookies=AUTH)
-    events = r.json()["events"]
-    assert len(events) == 1
-    row = events[0]
-    assert row["actor"] == "operator"
-    assert row["subject_kind"] == "catalog"
-    assert row["subject_id"] == "https://example.com/foo.img.gz"
-    assert row["details"] is not None
-    assert "upstream gave 404" in row["details"]["error"]
-
-
-def test_catalog_entry_add_https_populates_resolved_src(app_client: TestClient) -> None:
-    """An https catalog entry stores ``resolved_src`` equal to ``src``;
-    there's no manifest walk for plain HTTPS, the URL is the URL. Used
-    downstream by the withcache HEAD probe + PXE plan rewrite, which
-    key on ``resolved_src`` (so the oras vs https paths converge on one
-    field)."""
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": "https://example.com/path/foo.img.gz"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 201
-    row = next(
-        e
-        for e in app_client.get("/catalog/entries", cookies=AUTH).json()
-        if e["src"] == "https://example.com/path/foo.img.gz"
-    )
-    assert row["resolved_src"] == "https://example.com/path/foo.img.gz"
-
-
-def test_catalog_entry_add_oras_populates_resolved_src_with_blob_url(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An oras catalog entry's ``resolved_src`` carries the canonical
-    ``https://<host>/v2/<repo>/blobs/sha256:<digest>`` URL produced by
-    ``withcache.oras.resolve_ref`` at import time. Withcache sees a
-    plain HTTPS URL it can warm against; nothing downstream needs to
-    know the source was ``oras://``."""
-    from withcache import oras as _oras
-
-    blob_url = "https://ghcr.io/v2/safl/nosi/freebsd-14-headless/blobs/sha256:abc123"
-    monkeypatch.setattr(
-        _oras,
-        "resolve_ref",
-        lambda *_a, **_kw: _oras.ResolvedBlob(
-            blob_url=blob_url,
-            headers={"Authorization": "Bearer x"},
-            digest="sha256:abc123",
-            size=12345,
-            title="freebsd-14-headless.img.zst",
-        ),
-    )
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": "oras://ghcr.io/safl/nosi/freebsd-14-headless:latest"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 201
-    row = next(
-        e
-        for e in app_client.get("/catalog/entries", cookies=AUTH).json()
-        if e["src"] == "oras://ghcr.io/safl/nosi/freebsd-14-headless:latest"
-    )
-    assert row["resolved_src"] == blob_url
-
-
 def test_events_filter_by_subject_id(app_client: TestClient) -> None:
     """The per-MAC embedded card on /ui/machines/{mac} drives this
     filter -- only events for the given MAC come back. The /pxe
@@ -3517,25 +3390,6 @@ def test_head_images_missing_returns_404(app_client: TestClient) -> None:
 # ---------- DELETE /catalog/entries edge cases ----------------------------
 
 
-def test_delete_catalog_entry_unknown_src_returns_404(app_client: TestClient) -> None:
-    """Deleting a src that isn't in the catalog -> 404, not 500.
-    Operator-clickable Delete on a stale UI tab shouldn't crash
-    bty-web."""
-    r = app_client.request(
-        "DELETE",
-        "/catalog/entries?src=https://example.invalid/never-existed.img",
-        cookies=AUTH,
-    )
-    assert r.status_code == 404
-    assert "no catalog entry" in r.json()["detail"]
-
-
-def test_delete_catalog_entry_requires_auth(app_client: TestClient) -> None:
-    """The catalog delete is operator-only; unauth'd clients get 401."""
-    r = app_client.request("DELETE", "/catalog/entries?src=anything")
-    assert r.status_code == 401
-
-
 # ---------- full reflash-cycle state machine ------------------------------
 #
 # bty's reason for existence. The interplay of:
@@ -3566,16 +3420,11 @@ def _seed_flashable_machine(
         lambda *_a, **_kw: _MockResp(b"", {"Content-Length": "0"}),
     )
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
-    add = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": f"https://example.invalid/{mac.replace(':', '')}.img.gz",
-            "sha_url": f"https://example.invalid/{mac.replace(':', '')}.img.gz.sha256",
-        },
-        cookies=AUTH,
+    ref = _seed_catalog(
+        app_client,
+        f"https://example.invalid/{mac.replace(':', '')}.img.gz",
+        sha256=flash_sha,
     )
-    assert add.status_code == 201, add.text
-    ref = add.json()["bty_image_ref"]
     app_client.put(
         f"/machines/{mac}",
         json={
@@ -3885,14 +3734,15 @@ def test_pxe_plan_oras_entry_ships_raw_url_for_live_env_to_resolve(
     monkeypatch.setattr(_oras, "resolve_ref", lambda url: fake_blob)
 
     src = "oras://ghcr.io/safl/nosi/fedora-sysdev:latest"
-    r = app_client.post("/catalog/entries", json={"image_url": src}, cookies=AUTH)
-    assert r.status_code == 201, r.text
-    body = r.json()
-    ref = body["bty_image_ref"]
-    # The catalog entry stores format derived from the title's
-    # extension (here None -> defaults to "img.gz" per the handler).
-    assert body["format"] == "img.gz"
-    assert body["name"] == "nosi fedora-sysdev (x86_64, rolling)"
+    ref = _seed_catalog(
+        app_client,
+        src,
+        sha256=fake_blob.digest.removeprefix("sha256:"),
+        resolved_src=fake_blob.blob_url,
+        name=fake_blob.title,
+        format="img.gz",  # fallback since title has no extension
+        size_bytes=fake_blob.size,
+    )
 
     mac = "aa:bb:cc:dd:ee:b1"
     app_client.put(
@@ -3941,16 +3791,7 @@ def test_pxe_plan_keeps_name_when_it_has_extension(
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     flash_sha = "0123456789abcdef" * 4
     monkeypatch.setattr("bty.catalog.fetch_sha256_for_url", lambda *_a, **_kw: flash_sha)
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/demo.img.gz",
-            "sha_url": "https://example.invalid/demo.img.gz.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201
-    ref = r.json()["bty_image_ref"]
+    ref = _seed_catalog(app_client, "https://example.invalid/demo.img.gz", sha256=flash_sha)
 
     mac = "aa:bb:cc:dd:ee:b2"
     app_client.put(
@@ -4166,380 +4007,6 @@ def test_create_app_rotates_stale_state_db_end_to_end(
 # ---------- operator-curated catalog entries -------------------------------
 
 
-def test_catalog_entries_add_with_sha_url_resolves_sha(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``POST /catalog/entries`` with both image_url + sha_url:
-    server fetches sha_url, parses, picks the digest matching the
-    image-URL filename, stores the entry."""
-    sha = "a" * 64
-    manifest_body = f"{sha}  ubuntu-22.04.img.gz\n{'b' * 64}  other.img.gz\n"
-
-    def fake_urlopen(req, *_a, **_kw):  # type: ignore[no-untyped-def]
-        url = req if isinstance(req, str) else req.full_url
-        if url.endswith(".sha256"):
-            return _MockResp(manifest_body.encode())
-        # HEAD on the image URL: return Content-Length.
-        return _MockResp(b"", headers={"Content-Length": "12345"})
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "https://example.invalid/ubuntu-22.04.img.gz",
-            "sha_url": "https://example.invalid/SHA256SUMS.sha256",
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    body = r.json()
-    assert body["disk_image_sha"] == sha
-    assert body["src"] == "https://example.invalid/ubuntu-22.04.img.gz"
-    assert body["name"] == "ubuntu-22.04.img.gz"
-    assert body["format"] == "img.gz"
-    assert body["size_bytes"] == 12345
-    # Every add returns a bty_image_ref (sha256 of canonicalised src).
-    assert len(body["bty_image_ref"]) == 64
-
-
-def test_catalog_entries_add_without_sha_url_is_url_only(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """sha_url is optional; without it the entry stores
-    sha256=NULL. Surfaces in /images as a URL-only row."""
-
-    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
-        return _MockResp(b"", headers={"Content-Length": "999"})
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": "https://example.invalid/foo.img.gz"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    assert r.json()["disk_image_sha"] is None
-    assert len(r.json()["bty_image_ref"]) == 64
-
-    r2 = app_client.get("/images")
-    rows = r2.json()
-    by_name = {row["name"]: row for row in rows}
-    assert "foo.img.gz" in by_name
-    assert by_name["foo.img.gz"]["url"] == "https://example.invalid/foo.img.gz"
-    assert by_name["foo.img.gz"]["sha_short"] is None  # sha256 unknown
-
-
-def test_catalog_entries_add_rejects_non_https(app_client: TestClient) -> None:
-    """``image_url`` / ``sha_url`` must be http(s) or oras://; a typo
-    with a different scheme should 422 at the Pydantic layer rather
-    than land an unflashable entry."""
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": "ftp://example.invalid/foo.img.gz"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 422
-
-
-def test_catalog_entries_add_with_oras_ref_resolves_manifest(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``POST /catalog/entries`` with an ``oras://`` image_url resolves
-    the manifest at add time. The picked layer's content-addressed
-    digest becomes the row's sha256 (= machine-bindable); the layer
-    title annotation becomes the name; the layer size becomes
-    size_bytes. ``sha_url`` is ignored (manifest is authoritative)."""
-    import io
-    import json as _json
-
-    manifest = {
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.oci.image.manifest.v1+json",
-        "layers": [
-            {
-                "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
-                "digest": "sha256:" + "ab" * 32,
-                "size": 12345678,
-                "annotations": {
-                    "org.opencontainers.image.title": "nosi-debian-sysdev-x86_64.img.gz"
-                },
-            },
-        ],
-    }
-
-    def fake_urlopen(req, *_a, **_kw):
-        url = req if isinstance(req, str) else req.full_url
-
-        class _Resp(io.BytesIO):
-            # No-op headers attr; the fetch_to_cache path reads
-            # ``Content-Length`` off it, but the manifest / token
-            # responses here are short fixed JSON blobs that bypass
-            # the streaming branch.
-            headers: typing.ClassVar[dict[str, str]] = {}
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return None
-
-        if "/token" in url:
-            return _Resp(_json.dumps({"token": "anon-tok"}).encode())
-        if "/manifests/" in url:
-            return _Resp(_json.dumps(manifest).encode())
-        raise AssertionError(f"unexpected URL: {url}")
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
-    r = app_client.post(
-        "/catalog/entries",
-        json={
-            "image_url": "oras://ghcr.io/safl/nosi/debian-sysdev:latest",
-            "sha_url": None,
-        },
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
-    payload = r.json()
-    assert payload["src"] == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
-    assert payload["disk_image_sha"] == "ab" * 32  # stripped algorithm prefix
-    assert payload["name"] == "nosi-debian-sysdev-x86_64.img.gz"
-    assert payload["format"] == "img.gz"
-    assert payload["size_bytes"] == 12345678
-    assert payload["sha_url"] is None
-    assert len(payload["bty_image_ref"]) == 64
-
-
-def test_catalog_entries_add_with_oras_ref_propagates_resolve_failure(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Token / manifest fetch failure for an oras ref must 400 rather
-    than landing a half-populated row. The event log records the
-    failure with the operator's source IP."""
-
-    def fake_urlopen(*_a, **_kw):
-        raise OSError("connection refused")
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
-    r = app_client.post(
-        "/catalog/entries",
-        json={"image_url": "oras://ghcr.io/safl/nosi/no-such-pkg:latest"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 400
-    assert "oras" in r.json()["detail"].lower()
-
-
-def test_catalog_entries_add_duplicate_src_409(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Same image_url posted twice: 409. Operator must DELETE
-    first to replace."""
-
-    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
-        return _MockResp(b"", headers={"Content-Length": "111"})
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    body = {"image_url": "https://example.invalid/dup.img.gz"}
-    r1 = app_client.post("/catalog/entries", json=body, cookies=AUTH)
-    assert r1.status_code == 201
-    r2 = app_client.post("/catalog/entries", json=body, cookies=AUTH)
-    assert r2.status_code == 409
-
-
-def test_catalog_entries_list_and_delete(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fake_urlopen(*_a, **_kw):  # type: ignore[no-untyped-def]
-        return _MockResp(b"", headers={"Content-Length": "0"})
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    url = "https://example.invalid/del.img.gz"
-    app_client.post("/catalog/entries", json={"image_url": url}, cookies=AUTH)
-
-    # Auto-import sweeps dir-scan files into catalog_entries on
-    # bty-web startup; the app_client fixture seeds ``demo.qcow2``
-    # so we filter by src to isolate the URL-added entry under test.
-    r = app_client.get("/catalog/entries", cookies=AUTH)
-    assert r.status_code == 200
-    by_src = {row["src"]: row for row in r.json()}
-    assert url in by_src
-    assert by_src[url]["src"] == url
-
-    r = app_client.delete("/catalog/entries", params={"src": url}, cookies=AUTH)
-    assert r.status_code == 204
-
-    r = app_client.get("/catalog/entries", cookies=AUTH)
-    remaining = {row["src"] for row in r.json()}
-    assert url not in remaining
-
-
-def test_catalog_import_from_local_path(app_client: TestClient, tmp_path: Path) -> None:
-    """``POST /catalog/import?source=<path>`` parses the TOML and
-    inserts entries into ``catalog_entries``. No bytes fetched."""
-    manifest = tmp_path / "catalog.toml"
-    manifest.write_text(
-        """
-        version = 1
-
-        [[images]]
-        name = "alpha.img.gz"
-        format = "img.gz"
-        size_bytes = 1024
-        src = "https://example.invalid/alpha.img.gz"
-
-        [[images]]
-        name = "beta.img.gz"
-        format = "img.gz"
-        size_bytes = 2048
-        src = "https://example.invalid/beta.img.gz"
-        """,
-        encoding="utf-8",
-    )
-    r = app_client.post(
-        "/catalog/import",
-        params={"source": str(manifest)},
-        cookies=AUTH,
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["imported"] == 2
-    assert body["skipped"] == 0
-    assert body["errors"] == []
-    # The fixture seeds ``demo.qcow2`` which the auto-import sweep
-    # imports as ``file://demo.qcow2``; filter to the entries this
-    # test added.
-    r2 = app_client.get("/catalog/entries", cookies=AUTH)
-    names = {row["name"] for row in r2.json()}
-    assert "alpha.img.gz" in names
-    assert "beta.img.gz" in names
-    # No bytes fetched: /images shows cached=False
-    r3 = app_client.get("/images")
-    images_rows = {row["name"]: row for row in r3.json()}
-    assert "alpha.img.gz" in images_rows
-    assert images_rows["alpha.img.gz"]["cached"] is False
-
-
-def test_catalog_import_idempotent_skips_duplicates(app_client: TestClient, tmp_path: Path) -> None:
-    """Re-importing the same manifest counts duplicates as ``skipped``,
-    leaves the table unchanged."""
-    manifest = tmp_path / "catalog.toml"
-    manifest.write_text(
-        """
-        version = 1
-        [[images]]
-        name = "gamma.img.gz"
-        format = "img.gz"
-        src = "https://example.invalid/gamma.img.gz"
-        """,
-        encoding="utf-8",
-    )
-    r1 = app_client.post("/catalog/import", params={"source": str(manifest)}, cookies=AUTH)
-    assert r1.json()["imported"] == 1
-    r2 = app_client.post("/catalog/import", params={"source": str(manifest)}, cookies=AUTH)
-    assert r2.json()["imported"] == 0
-    assert r2.json()["skipped"] == 1
-    # Filter to the gamma row; the auto-import sweep adds file://
-    # entries for fixture-seeded files (e.g. demo.qcow2).
-    names = {row["name"] for row in app_client.get("/catalog/entries", cookies=AUTH).json()}
-    assert "gamma.img.gz" in names
-
-
-def test_catalog_import_rejects_invalid_source_scheme(
-    app_client: TestClient,
-) -> None:
-    """Unsupported schemes (ftp://, etc.) return 400."""
-    r = app_client.post(
-        "/catalog/import",
-        params={"source": "ftp://example.invalid/catalog.toml"},
-        cookies=AUTH,
-    )
-    assert r.status_code == 400
-    assert "ftp" in r.text or "scheme" in r.text
-
-
-def test_catalog_import_requires_auth(app_client: TestClient) -> None:
-    r = app_client.post(
-        "/catalog/import",
-        params={"source": "https://example.invalid/catalog.toml"},
-    )
-    assert r.status_code == 401
-
-
-def test_catalog_import_with_oras_entry_resolves_sha(
-    app_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Manifest entries with ``oras://`` src and no pre-pinned
-    sha256 get resolved at import time so the imported row carries
-    a machine-bindable digest. The resolve uses the same code path
-    as ``POST /catalog/entries`` for oras URLs."""
-    import io
-    import json as _json
-
-    manifest_text = """
-    version = 1
-    [[images]]
-    name = "nosi-debian-sysdev.img.gz"
-    format = "img.gz"
-    src = "oras://ghcr.io/safl/nosi/debian-sysdev:latest"
-    """
-    manifest_file = tmp_path / "catalog.toml"
-    manifest_file.write_text(manifest_text, encoding="utf-8")
-
-    oras_manifest = {
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.oci.image.manifest.v1+json",
-        "layers": [
-            {
-                "mediaType": "application/vnd.nosi.disk-image.layer.v1+gzip",
-                "digest": "sha256:" + "cd" * 32,
-                "size": 7654321,
-                "annotations": {"org.opencontainers.image.title": "nosi-debian-sysdev.img.gz"},
-            },
-        ],
-    }
-
-    def fake_urlopen(req, *_a, **_kw):  # type: ignore[no-untyped-def]
-        url = req if isinstance(req, str) else req.full_url
-
-        class _Resp(io.BytesIO):
-            headers: typing.ClassVar[dict[str, str]] = {}
-
-            def __enter__(self):  # type: ignore[no-untyped-def]
-                return self
-
-            def __exit__(self, *_args):  # type: ignore[no-untyped-def]
-                return None
-
-        if "/token" in url:
-            return _Resp(_json.dumps({"token": "anon-tok"}).encode())
-        if "/manifests/" in url:
-            return _Resp(_json.dumps(oras_manifest).encode())
-        raise AssertionError(f"unexpected URL: {url}")
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
-    r = app_client.post(
-        "/catalog/import",
-        params={"source": str(manifest_file)},
-        cookies=AUTH,
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["imported"] == 1
-    # Filter to the oras-imported row; ignore the auto-imported
-    # file:// row(s) the fixture's image_root seeds.
-    rows = [
-        row
-        for row in app_client.get("/catalog/entries", cookies=AUTH).json()
-        if row["src"].startswith("oras://")
-    ]
-    assert len(rows) == 1
-    assert rows[0]["disk_image_sha"] == "cd" * 32
-    assert len(rows[0]["bty_image_ref"]) == 64
-    assert rows[0]["size_bytes"] == 7654321
-
-
 def test_ui_images_renders_catalog_entries_in_added_at_order(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4564,8 +4031,7 @@ def test_ui_images_renders_catalog_entries_in_added_at_order(
         "https://example.invalid/bravo.img.gz",
         "https://example.invalid/charlie.img.gz",
     ):
-        r = app_client.post("/catalog/entries", json={"image_url": url}, cookies=AUTH)
-        assert r.status_code == 201
+        _seed_catalog(app_client, url)
 
     r = app_client.get("/ui/images", cookies=AUTH)
     assert r.status_code == 200
@@ -4880,142 +4346,6 @@ def test_release_fetch_manager_enqueue_rejects_malformed_tag() -> None:
     asyncio.run(go())
 
 
-def test_catalog_entries_add_rejects_url_without_host(
-    app_client: TestClient,
-) -> None:
-    """``image_url`` regex requires a host segment. ``https://?``
-    (empty host) and ``http:///path`` (host-less) must 422 at the
-    Pydantic layer rather than landing as unflashable rows."""
-    for bad in ("https://?", "http:///path", "https://"):
-        r = app_client.post(
-            "/catalog/entries",
-            json={"image_url": bad},
-            cookies=AUTH,
-        )
-        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
-
-
-def test_catalog_entries_add_rejects_url_without_filename(
-    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``image_url`` must end in a filename component. URLs that
-    have a host but no path (``https://example.com``) or a
-    trailing-slash path (``https://example.com/foo/``) used to
-    fall through and store the entire URL as the entry's
-    ``name`` -- the catalog table then rendered ``<code>https://
-    example.com</code>`` as the display label, which was useless.
-    Reject at validation time instead."""
-
-    def fake_urlopen(*_a: object, **_kw: object) -> _MockResp:
-        return _MockResp(b"", headers={"Content-Length": "0"})
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    # ``Path("/foo/").name`` is ``"foo"`` (pathlib normalises the
-    # trailing slash), so URLs like ``https://example.com/foo/``
-    # have a basename and remain accepted. The reject-list here
-    # is the genuinely-no-basename forms: bare host, bare host +
-    # ``/``.
-    for bad in ("https://example.com", "https://example.com/"):
-        r = app_client.post(
-            "/catalog/entries",
-            json={"image_url": bad},
-            cookies=AUTH,
-        )
-        assert r.status_code == 422, f"expected 422 for {bad!r}, got {r.status_code}"
-        assert "filename component" in r.text
-
-
-def test_ui_catalog_upload_requires_auth(app_client: TestClient) -> None:
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", b"version = 1\n", "application/toml")},
-        follow_redirects=False,
-    )
-    assert r.status_code == 401
-
-
-def test_ui_catalog_upload_auto_imports_manifest_into_catalog_entries(
-    app_client: TestClient,
-) -> None:
-    """A manifest uploaded via /ui/catalog/upload must auto-import
-    its entries into ``catalog_entries`` so the /ui/machines/{mac}
-    dropdown becomes populated without a separate /catalog/import
-    round-trip. Pre-fix the entries showed up on /ui/images (the
-    merge surfaced them) but were invisible in the machine binding
-    picker."""
-    body = (
-        b"version = 1\n\n"
-        b"[[images]]\n"
-        b'name = "ubuntu-from-manifest"\n'
-        b'src = "https://example.invalid/ubuntu-from-manifest.img.gz"\n'
-        b'format = "img.gz"\n'
-    )
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", body, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    # /catalog/entries returns the catalog_entries DB rows. The
-    # manifest entry should now be in there with the right name +
-    # src + bty_image_ref.
-    entries = app_client.get("/catalog/entries", cookies=AUTH).json()
-    found = [e for e in entries if e["name"] == "ubuntu-from-manifest"]
-    assert len(found) == 1
-    assert found[0]["src"] == "https://example.invalid/ubuntu-from-manifest.img.gz"
-    # bty_image_ref is a 64-hex sha derived from canonicalised src.
-    assert len(found[0]["bty_image_ref"]) == 64
-
-
-def test_ui_catalog_upload_imports_into_db_and_303s_on_success(
-    app_client: TestClient,
-) -> None:
-    """Upload a valid catalog -> entries are imported into the
-    ``catalog_entries`` DB, the bytes are written to ``manifest_path``,
-    303 back to /ui/images without an error param."""
-    body = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", body, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/ui/images"
-    # Entry now visible via the catalog list endpoint (which reads
-    # from catalog_entries) -- evidence the import landed in the DB.
-    listing = app_client.get("/catalog/entries", cookies=AUTH).json()
-    assert any(e["src"] == "https://example.com/demo.img.zst" for e in listing)
-
-
-def test_ui_catalog_upload_rejects_bad_manifest_keeps_existing(
-    app_client: TestClient,
-    tmp_path: Path,
-) -> None:
-    """A parse failure 303s back with ?error=... and does NOT
-    clobber the on-disk manifest -- so a stray bad upload can't
-    nuke a working catalog."""
-    state_dir = tmp_path / "bty-state"
-    good = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
-    manifest = state_dir / "catalog.toml"
-    manifest.write_bytes(good)
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", b"this is not valid toml [[", "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert manifest.read_bytes() == good  # unchanged
-
-
-def test_ui_catalog_fetch_release_requires_auth(app_client: TestClient) -> None:
-    r = app_client.post("/ui/catalog/fetch-release", follow_redirects=False)
-    assert r.status_code == 401
-
-
 class _FakeUrlopenResp:
     """Stub for ``urllib.request.urlopen`` context-manager value.
 
@@ -5041,341 +4371,7 @@ class _FakeUrlopenResp:
         return None
 
 
-def test_ui_catalog_fetch_release_imports_into_db_and_303s(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fetch-release stubs urlopen, imports the bytes' entries into
-    ``catalog_entries``, writes the bytes to ``manifest_path``, then
-    303s back to /ui/images."""
-    body = b'version = 1\n\n[[images]]\nname = "rel"\nsrc = "https://example.com/rel.img.zst"\n'
-
-    import urllib.request as _urlreq
-
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(body))
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
-    assert r.headers["location"] == "/ui/images"
-    listing = app_client.get("/catalog/entries", cookies=AUTH).json()
-    assert any(e["src"] == "https://example.com/rel.img.zst" for e in listing)
-
-
 # ---------- /ui/catalog/upload and /ui/catalog/fetch-release error matrix --
-
-
-def test_ui_catalog_upload_no_file_field_303s_with_error(app_client: TestClient) -> None:
-    """A multipart POST with no ``file`` field bounces back with a
-    flash error instead of 500-ing or silently writing nothing."""
-    # ``files`` empty + ``data`` populated forces httpx to send a
-    # multipart body that has no file part.
-    r = app_client.post(
-        "/ui/catalog/upload",
-        data={"unrelated": "x"},
-        files={"otherfield": ("x.toml", b"version = 1\n", "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "no%20file%20in%20upload" in r.headers["location"]
-
-
-def test_ui_catalog_upload_empty_file_303s_with_error(app_client: TestClient) -> None:
-    """A zero-byte upload is rejected with a flash error."""
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", b"", "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "empty" in r.headers["location"]
-
-
-def test_ui_catalog_upload_oversized_303s_with_error(
-    app_client: TestClient,
-    tmp_path: Path,
-) -> None:
-    """A multi-MB upload (operator dropped a wrong file like an
-    .iso into the catalog form) is rejected before we try parsing
-    it. The on-disk manifest is unaffected even if one existed."""
-    state_dir = tmp_path / "bty-state"
-    existing = state_dir / "catalog.toml"
-    good = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
-    existing.write_bytes(good)
-    # 2 MiB > 1 MiB cap. Use a memoryview so the test stays cheap.
-    huge = b"# fake huge body\n" + b"x" * (2 * 1024 * 1024)
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("catalog.toml", huge, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "exceeded" in r.headers["location"]
-    # Existing manifest is untouched (size check fires before
-    # the on-disk rename step).
-    assert existing.read_bytes() == good
-
-
-def test_ui_catalog_upload_wrong_extension_303s_with_error(
-    app_client: TestClient,
-) -> None:
-    """An operator-friendly hint: a .yaml / .json upload to the
-    catalog manifest form gets a clear "expected .toml" message
-    instead of a generic "TOML parse failed" buried inside the
-    parse error path."""
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("manifest.yaml", b"version: 1\nimages: []\n", "text/yaml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "unexpected%20file%20extension" in r.headers["location"]
-
-
-def test_ui_catalog_upload_binary_content_303s_with_parse_error(
-    app_client: TestClient,
-    tmp_path: Path,
-) -> None:
-    """A .toml-named upload that is actually binary content
-    bounces on the TOML parser. The on-disk manifest is
-    preserved (write happens AFTER parse)."""
-    state_dir = tmp_path / "bty-state"
-    existing = state_dir / "catalog.toml"
-    good = b'version = 1\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/demo.img.zst"\n'
-    existing.write_bytes(good)
-    # 100 bytes of binary content -- below the size cap so it
-    # makes it to the parse step.
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={"file": ("manifest.toml", b"\x89PNG\r\n\x1a\n" + b"\x00" * 96, "application/toml")},
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "parse%20failed" in r.headers["location"]
-    assert existing.read_bytes() == good
-
-
-def test_ui_catalog_upload_wrong_schema_version_303s_with_error(
-    app_client: TestClient,
-) -> None:
-    """A syntactically-valid TOML with the wrong schema version
-    (or missing version) gets rejected at parse, surfacing the
-    schema mismatch in the flash message."""
-    r = app_client.post(
-        "/ui/catalog/upload",
-        files={
-            "file": (
-                "catalog.toml",
-                b'version = 99\n\n[[images]]\nname = "demo"\nsrc = "https://example.com/x.img"\n',
-                "application/toml",
-            ),
-        },
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "parse%20failed" in r.headers["location"]
-
-
-def test_ui_catalog_fetch_release_url_error_303s_with_error(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A urlopen URLError (no network, DNS failure, etc.) lands on
-    the flash slot, not a 500."""
-    import urllib.error as _urlerr
-    import urllib.request as _urlreq
-
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise _urlerr.URLError("no route to host")
-
-    monkeypatch.setattr(_urlreq, "urlopen", _boom)
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "fetch%20failed" in r.headers["location"]
-
-
-def test_ui_catalog_fetch_release_http_404_303s_with_error(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A 404 from GitHub releases (e.g. the release tag has no
-    catalog.toml asset uploaded) raises HTTPError (a URLError
-    subclass) and lands on the flash slot."""
-    import urllib.error as _urlerr
-    import urllib.request as _urlreq
-
-    def _http404(*_a: object, **_kw: object) -> None:
-        raise _urlerr.HTTPError(
-            url="https://example.invalid",
-            code=404,
-            msg="Not Found",
-            hdrs=None,  # type: ignore[arg-type]
-            fp=None,
-        )
-
-    monkeypatch.setattr(_urlreq, "urlopen", _http404)
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-
-
-def test_ui_catalog_fetch_release_timeout_303s_with_error(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A network timeout lands on the flash slot."""
-    import urllib.request as _urlreq
-
-    def _timeout(*_a: object, **_kw: object) -> None:
-        raise TimeoutError("read timed out")
-
-    monkeypatch.setattr(_urlreq, "urlopen", _timeout)
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-
-
-def test_ui_catalog_fetch_release_non_toml_body_303s_with_error(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If GitHub serves an HTML page (e.g. a 200 to a redirect
-    landing on a marketing page) instead of TOML, parse fails
-    and we surface that on the flash slot rather than persisting
-    HTML to disk as the manifest."""
-    import urllib.request as _urlreq
-
-    html_404 = b"<!DOCTYPE html><html><body><h1>Not Found</h1></body></html>\n"
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(html_404))
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "parse%20failed" in r.headers["location"]
-
-
-def test_ui_catalog_fetch_release_empty_body_303s_with_error(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty (zero-byte) response from the release URL is
-    rejected with a flash message rather than persisting an
-    empty manifest."""
-    import urllib.request as _urlreq
-
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(b""))
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "empty" in r.headers["location"]
-
-
-def test_ui_catalog_fetch_release_oversized_body_303s_with_error(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A multi-MB body from the release URL gets capped at the
-    same 1 MiB the upload form uses."""
-    import urllib.request as _urlreq
-
-    huge = b"# fake huge body\n" + b"x" * (2 * 1024 * 1024)
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(huge))
-    r = app_client.post(
-        "/ui/catalog/fetch-release",
-        cookies=AUTH,
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"].startswith("/ui/images?error=")
-    assert "exceeded" in r.headers["location"]
-
-
-def test_ui_catalog_fetch_release_is_idempotent_on_repeated_imports(
-    app_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Each entry's ``src`` is UNIQUE in ``catalog_entries``; a
-    repeated fetch-release of the same manifest skips already-imported
-    rows on the second pass. /ui/images should render each src once,
-    regardless of how many times the manifest got re-imported.
-
-    Historical context: an earlier model rendered manifest entries
-    AND their auto-imported DB rows separately, double-counting each
-    unsha src. The current model imports into DB once + reads only
-    from DB, so the dedup invariant is enforced at the SQL layer
-    (UNIQUE on src). This test pins the operator-visible result.
-    """
-    import urllib.request as _urlreq
-
-    body = (
-        b"version = 1\n"
-        b"\n"
-        b'[[images]]\nname = "alpha"\nsrc = "https://example.com/alpha.img.gz"\n'
-        b"\n"
-        b'[[images]]\nname = "beta"\nsrc = "https://example.com/beta.img.gz"\n'
-        b"\n"
-        b'[[images]]\nname = "gamma"\nsrc = "https://example.com/releases/latest/download/gamma.img.gz"\n'
-    )
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *_a, **_kw: _FakeUrlopenResp(body))
-    for _ in range(2):  # idempotency: second fetch must not duplicate
-        r = app_client.post(
-            "/ui/catalog/fetch-release",
-            cookies=AUTH,
-            follow_redirects=False,
-        )
-        assert r.status_code == 303, r.text
-        assert r.headers["location"] == "/ui/images"
-
-    page = app_client.get("/ui/images", cookies=AUTH)
-    assert page.status_code == 200, page.text
-    html = page.text
-    for src in (
-        "https://example.com/alpha.img.gz",
-        "https://example.com/beta.img.gz",
-        "https://example.com/releases/latest/download/gamma.img.gz",
-    ):
-        assert html.count(src) >= 1, f"missing src {src!r} on /ui/images"
-        assert html.count(src) <= 5, (
-            f"src {src!r} rendered {html.count(src)} times on /ui/images; "
-            "expected at most 5 per entry (Source cell copy chip: "
-            "data-copy + title + visible code = 3; plus Check button "
-            "data-src + Delete button data-src = 2). Dedup invariant "
-            "(UNIQUE on catalog_entries.src) was violated."
-        )
 
 
 def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_path: Path) -> None:
