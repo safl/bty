@@ -1151,9 +1151,9 @@ def create_app(
             # imported without a known sha -> omitted below so the
             # live env flashes without verifying.
             disk_image_sha = entry.get("sha256") if entry else None
-            # withcache's lookup keys on ``src`` only (is_cached / blob_url
-            # both take ``src``, never ``resolved_src``). ``resolved_src``
-            # stays purely the non-withcache fallback below.
+            # withcache's lookup keys on ``src`` only (``blob_url``
+            # takes ``src``, never ``resolved_src``). ``resolved_src``
+            # stays purely the no-withcache fallback below.
             with _db.open_db(state_path) as conn:
                 withcache_url = (
                     _settings_store.resolve_withcache_url(conn)
@@ -1161,33 +1161,25 @@ def create_app(
                     else None
                 )
             if image_name is not None and target_disk_serial:
-                # The client detects image format from the URL name's
-                # extension. An oras title ("nosi fedora-sysdev (x86_64,
-                # rolling)") has none, so the flash gets rejected as
-                # "format not recognised". When the catalog name carries
-                # no usable extension, synthesise a filename from the
-                # stored format so even older clients detect it; the
-                # ``{ref}`` segment is what actually resolves the bytes,
-                # so the name is free to change.
-                # The live env reaches the bytes one of three ways:
-                # withcache (when configured + warm), the canonical
-                # plain-HTTPS ``resolved_src`` (for catalog rows whose
-                # import-time resolution populated it), or the original
-                # ``src`` -- ``oras://`` URLs included, which the live
-                # env's bty TUI handles via ``withcache.oras`` (resolve
-                # + bearer mint + curl in the same process).
+                # Since withcache v0.11.0 an entry only appears in
+                # ``WithcacheCatalog.entries`` when its bytes are on
+                # disk in withcache. So if we have a catalog entry
+                # and a configured withcache, we always route the
+                # flash chain through withcache. No HEAD probe.
+                # Without a withcache we fall back to the canonical
+                # ``resolved_src`` (plain-HTTPS for http entries;
+                # resolved blob URL for oras) or the original
+                # ``src`` -- ``oras://`` URLs included, which the
+                # live env's bty TUI handles via ``withcache.oras``
+                # (resolve + bearer mint + curl in the same
+                # process).
                 is_oras = src is not None and src.startswith("oras://")
                 image_url = src or ""
                 if src is not None:
-                    if withcache_url and _withcache.is_cached(withcache_url, src):
+                    if withcache_url:
                         image_url = _withcache.blob_url(withcache_url, src)
                         cache_hit = True
                     elif resolved_src is not None:
-                        # Plain-HTTPS canonical URL stored at import
-                        # time. Same URL as src for an http(s) entry;
-                        # the resolved blob URL for oras (which the
-                        # live env can't fetch anonymously, so prefer
-                        # ``src`` below if no withcache).
                         image_url = resolved_src if not is_oras else src
                         cache_hit = False
                     else:
@@ -1677,31 +1669,17 @@ def create_app(
     def upsert_machine(mac: str, body: _models.MachineUpsert, request: Request) -> _models.Machine:
         normalised = _normalise_mac(mac)
         now = now_iso()
-        # Downloaded-first gate: when the operator binds a catalog
-        # entry AND that entry is in withcache's catalog, refuse if
-        # withcache hasn't downloaded the bytes yet. Since withcache
-        # v0.10.0 there is no auto-fetch on /b/<url> miss, so the
-        # flash chain or the nbdmux export would just 404 at boot
-        # time. Refs not in the catalog fall through -- the plan
-        # endpoint already handles that with an interactive-mode
-        # fallback, and disallowing bogus refs here would break
-        # tests that stage machines before adding entries.
-        _flashable_modes = ("bty-flash-always", "bty-flash-once", "ramboot")
+        # Look up the catalog entry once so both the ramboot gate
+        # below and any later logic can inspect it. Since withcache
+        # v0.11.0 GET /catalog returns ONLY downloaded entries, so
+        # any entry that's in bty's cache is by definition
+        # flash-ready; no separate downloaded_first gate needed.
         catalog_entry: dict[str, Any] | None = None
-        if body.boot_mode in _flashable_modes and body.bty_image_ref:
-            catalog = request.app.state.withcache_catalog
-            catalog_entry = catalog.get_by_ref(body.bty_image_ref)
-            if catalog_entry is not None and not catalog_entry.get("downloaded_at"):
-                withcache_url = catalog.withcache_url or "(unset)"
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"catalog entry {catalog_entry.get('name')!r} has not been "
-                        f"downloaded on withcache side; boot_mode={body.boot_mode} "
-                        f"needs the bytes present. Hit Download on "
-                        f"{withcache_url}/ui/catalog before binding."
-                    ),
-                )
+        if (
+            body.boot_mode in ("bty-flash-always", "bty-flash-once", "ramboot")
+            and body.bty_image_ref
+        ):
+            catalog_entry = request.app.state.withcache_catalog.get_by_ref(body.bty_image_ref)
         # Ramboot bind-time gate: also needs the entry registered as
         # an nbdmux export at status='ready'. nbdmux owns the
         # decompress + register pipeline; bty validates. Since PR

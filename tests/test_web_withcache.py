@@ -1,18 +1,17 @@
 """Tests for ``bty.web._withcache`` and the withcache-url setting.
 
-Covers the origin -> withcache serve-URL encoding (the contract with
-withcache's own ``/b/`` decoding), the graceful ``is_cached`` HEAD probe
-(hit / miss / unreachable), and the ``resolve_withcache_url`` precedence
-(override -> env -> None).
+Covers the origin -> withcache serve-URL encoding (the contract
+with withcache's own ``/b/`` decoding) + the
+``resolve_withcache_url`` precedence (override -> env -> None).
+The runtime HEAD probe (``is_cached``) went away in v0.68.0 --
+since withcache v0.11.0 the catalog surface already guarantees
+readiness, so there's nothing to probe.
 """
 
 from __future__ import annotations
 
 import base64
-import http.server
-import socketserver
 import sqlite3
-import threading
 from pathlib import Path
 
 import pytest
@@ -34,44 +33,6 @@ def test_blob_url_encodes_origin_and_keeps_basename() -> None:
     token = url[len("http://cache:8081/b/") :].split("/")[0]
     decoded = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
     assert decoded == origin  # withcache can recover the exact origin
-
-
-class _Cache(http.server.BaseHTTPRequestHandler):
-    """Stand-in for withcache: 200 for one known token path, else 404."""
-
-    cached_path = ""
-
-    def do_HEAD(self) -> None:
-        self.send_response(200 if self.path == self.cached_path else 404)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    def log_message(self, *a: object) -> None:
-        pass
-
-
-def _serve() -> tuple[socketserver.TCPServer, str]:
-    httpd = socketserver.TCPServer(("127.0.0.1", 0), _Cache)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
-
-
-def test_is_cached_hit_and_miss() -> None:
-    httpd, base = _serve()
-    try:
-        origin = "https://h/p/x.img.gz"
-        # Tell the stub which path counts as cached.
-        _Cache.cached_path = "/" + _withcache.blob_url(base, origin).split("/", 3)[3]
-        assert _withcache.is_cached(base, origin) is True
-        assert _withcache.is_cached(base, "https://h/p/other.img.gz") is False
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-
-
-def test_is_cached_unreachable_is_false() -> None:
-    # Nothing listening on this port -> graceful False, never raises.
-    assert _withcache.is_cached("http://127.0.0.1:9", "https://h/x", timeout=0.5) is False
 
 
 def test_resolve_withcache_url_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

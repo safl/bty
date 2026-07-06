@@ -9,6 +9,31 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.68.0] - 2026-07-06
+
+### Breaking
+
+Requires withcache >= 0.11.0. That release changed `GET /catalog` to
+return only downloaded entries (staged entries stay invisible to
+trio consumers), so bty no longer needs the v0.67.0 downloaded-first
+bind gate + the runtime `is_cached` HEAD probe. Both are retired.
+
+`PUT /machines` for a flash / ramboot mode no longer refuses on
+"catalog entry not downloaded on withcache" (v0.67.0's 422); if the
+entry is in bty's catalog snapshot, it's ready. The ramboot-side
+"must be a ready nbdmux export" gate stays.
+
+`bty.web._withcache.is_cached()` is deleted. The flash-plan renderer
+in `_app.py` always routes through `_withcache.blob_url` when
+withcache is configured; the previous `_withcache.is_cached` gate
+was defensive against pre-withcache-0.11 catalog surfaces and no
+longer serves a purpose. Consumers importing `is_cached` need to
+drop the check.
+
+The `/ui/machines/{mac}` image picker stops disabling options and
+stops rendering the "not downloaded on withcache" hint -- every
+option is a downloaded catalog entry by definition.
+
 ## [0.67.0] - 2026-07-06
 
 ### Breaking
