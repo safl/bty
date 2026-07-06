@@ -17,6 +17,8 @@ collapse into.
 
 from __future__ import annotations
 
+from typing import Any
+
 from nbdmux import client as nbdmux_client
 
 _POLL_TIMEOUT_SECONDS = 2.0
@@ -41,3 +43,22 @@ def status_by_ref(nbdmux_url: str | None) -> dict[str, str]:
     except Exception:
         return {}
     return {str(e.get("name")): str(e.get("status") or "") for e in exports if e.get("name")}
+
+
+def exports_by_src(nbdmux_url: str | None) -> list[dict[str, Any]]:
+    """Return the raw ``list_exports`` rows, or ``[]`` on failure.
+
+    Since PR #33 nbdmux keys exports by their URL basename rather
+    than by bty's 64-hex ref, so lookup callers walk the full row
+    list and match on ``src_url``. Same swallow-and-empty-list
+    behavior as :func:`status_by_ref` -- unreachable / timeout /
+    HTTP error yield ``[]`` and the enclosing plan renderer
+    gracefully falls back to interactive mode.
+    """
+    if not nbdmux_url:
+        return []
+    try:
+        exports = nbdmux_client.list_exports(server=nbdmux_url, timeout=_POLL_TIMEOUT_SECONDS)
+    except Exception:
+        return []
+    return [dict(e) for e in exports]
