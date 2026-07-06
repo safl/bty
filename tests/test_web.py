@@ -39,11 +39,18 @@ def _seed_catalog(
     format: str | None = "img.gz",
     size_bytes: int | None = 0,
     name: str | None = None,
+    downloaded: bool = True,
 ) -> str:
     """Seed one catalog entry via ``app.state.withcache_catalog`` and
     return its ``bty_image_ref``. Replaces the pre-cutover pattern of
     ``r = app_client.post("/catalog/entries", ...); ref = r.json()["bty_image_ref"]``
-    now that bty consumes withcache as the catalog source of truth."""
+    now that bty consumes withcache as the catalog source of truth.
+
+    ``downloaded=True`` stamps ``downloaded_at`` on the entry so the
+    machine-bind gate (v0.66.2+) accepts it. Tests that want to
+    exercise the not-downloaded refusal path pass
+    ``downloaded=False`` to skip the stamp.
+    """
     from urllib.parse import urlparse
 
     from bty.catalog import image_ref_for_src
@@ -59,6 +66,8 @@ def _seed_catalog(
         entry["format"] = format
     if size_bytes is not None:
         entry["size_bytes"] = size_bytes
+    if downloaded:
+        entry["downloaded_at"] = "2026-07-06T00:00:00Z"
     existing = list(app_client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
     existing.append(entry)
     app_client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]
@@ -1318,16 +1327,26 @@ def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> No
     assert "kernel" not in body
 
 
-def _mock_nbdmux_ready(monkeypatch: pytest.MonkeyPatch, ref: str) -> None:
-    """Replace ``nbdmux.client.list_exports`` with a stub that
-    returns ``ref`` at ``status='ready'``. The bty-side iPXE branch
-    queries nbdmux to decide readiness (since v0.65.0; the local
-    ramboot_cache table is gone)."""
+def _mock_nbdmux_ready(
+    monkeypatch: pytest.MonkeyPatch, ref: str, *, src_url: str | None = None
+) -> None:
+    """Replace ``nbdmux.client.list_exports`` with a stub that returns
+    a ready export. Since nbdmux PR #33 the export is keyed on the
+    URL basename + ``src_url``, so the stub returns both fields.
+    Callers that seed a matching catalog entry with a matching src
+    let bty look the export up by src_url; callers that don't
+    fall back to the legacy name==ref match."""
     from nbdmux import client as nbdmux_client
 
     def _fake(server: str, timeout: float = 2.0) -> list[dict[str, object]]:
         del server, timeout
-        return [{"name": ref, "status": "ready"}]
+        return [
+            {
+                "name": ref,
+                "status": "ready",
+                "src_url": src_url or "",
+            }
+        ]
 
     monkeypatch.setattr(nbdmux_client, "list_exports", _fake)
 
@@ -1386,11 +1405,11 @@ def test_ramboot_bind_rejected_when_ref_not_in_nbdmux(
     )
     assert r.status_code == 422
     assert "ramboot" in r.text.lower()
-    # v0.66.1+: /ui/images is gone; operators warm on nbdmux's own
-    # /ui/exports (which now picks from withcache's catalog), so the
-    # rejection message points them there.
+    # v0.66.1+: /ui/images is gone; operators pick from nbdmux's
+    # /ui/exports (which now picks from withcache's downloaded
+    # catalog entries), so the rejection message points them there.
     assert "/ui/exports" in r.text
-    assert "Warm it" in r.text
+    assert "Pick it" in r.text
 
 
 def test_ramboot_bind_502_when_nbdmux_unreachable(

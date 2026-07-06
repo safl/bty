@@ -472,13 +472,33 @@ def register_ui_routes(
             )
             nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
         # Per-row ramboot status: one nbdmux ``/exports`` poll per
-        # page render, keyed by ref. Since v0.65.0 the warming
-        # pipeline lives in nbdmux (no local cache table); the row
-        # template renders the resulting status pill under the
-        # boot-mode badge when boot_mode=ramboot. Blank URL or an
-        # unreachable daemon collapses to ``{}`` -- the page still
-        # renders, just without the per-row pill.
-        ramboot_status_by_ref = _ramboot.status_by_ref(nbdmux_url)
+        # page render, keyed by the catalog entry's src URL. Since
+        # PR #33 nbdmux exports are named by URL basename (not by
+        # bty's 64-hex ref), so we build a ``{src -> status}`` map
+        # from the raw rows and let the template look up each
+        # bound machine's src to render the boot-mode pill. Blank
+        # URL / unreachable daemon collapses to ``{}`` and the
+        # page renders without the per-row pill.
+        _rambo_rows = _ramboot.exports_by_src(nbdmux_url)
+        ramboot_status_by_src: dict[str, str] = {
+            str(row.get("src_url")): str(row.get("status") or "")
+            for row in _rambo_rows
+            if row.get("src_url")
+        }
+        # Bound refs -> src map so the template can look up per-row
+        # status without knowing the catalog shape.
+        _cat = request.app.state.withcache_catalog
+        ramboot_status_by_ref: dict[str, str] = {}
+        for r in rows:
+            row_ref = r["bty_image_ref"]
+            if not row_ref:
+                continue
+            entry = _cat.get_by_ref(row_ref)
+            if entry is None:
+                continue
+            src = entry.get("src") or entry.get("resolved_src")
+            if src and src in ramboot_status_by_src:
+                ramboot_status_by_ref[row_ref] = ramboot_status_by_src[src]
         machines = [_row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
         # v0.32.4: ``?deleted=<mac>`` / ``?missing=<mac>`` carried over
         # from ``POST /ui/machines/{mac}/delete`` so the operator gets a

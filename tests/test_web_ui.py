@@ -834,6 +834,7 @@ def _seed_https_entry(
         "src": url,
         "resolved_src": url,
         "format": "img.gz",
+        "downloaded_at": "2026-07-06T00:00:00Z",
     }
     existing = list(client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
     existing.append(entry)

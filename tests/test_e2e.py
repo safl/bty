@@ -106,10 +106,14 @@ def _seed_catalog(
     format: str | None = "img.gz",
     size_bytes: int | None = 0,
     name: str | None = None,
+    downloaded: bool = True,
 ) -> str:
     """Seed one catalog entry via ``app.state.withcache_catalog`` and
     return its ``bty_image_ref``. Post-cutover replacement for the
-    pre-v0.66.0 direct-SQL INSERT into ``catalog_entries``."""
+    pre-v0.66.0 direct-SQL INSERT into ``catalog_entries``.
+
+    ``downloaded=True`` stamps ``downloaded_at`` so the bind gate
+    (v0.66.2+) accepts binds against this entry."""
     from urllib.parse import urlparse
 
     ref = _catalog.image_ref_for_src(src)
@@ -123,6 +127,8 @@ def _seed_catalog(
         entry["format"] = format
     if size_bytes is not None:
         entry["size_bytes"] = size_bytes
+    if downloaded:
+        entry["downloaded_at"] = "2026-07-06T00:00:00Z"
     existing = list(app_client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
     existing.append(entry)
     app_client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]

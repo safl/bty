@@ -674,9 +674,32 @@ def create_app(
             with _db.open_db(state_path) as conn:
                 nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
                 overlay_size = _settings_store.resolve_ramboot_overlay_size(conn)
-            ramboot_ready = (
-                bool(ref) and _ramboot.status_by_ref(nbdmux_url).get(str(ref)) == "ready"
+            # Look up the ready nbdmux export whose src_url matches
+            # the bound catalog entry's src. Since PR #33 export
+            # names are the URL basename (not the ref), so we key
+            # on src_url; the resolved ``export_name`` is what the
+            # initramfs asks nbd-server for.
+            catalog_entry = request.app.state.withcache_catalog.get_by_ref(ref) if ref else None
+            entry_src = (
+                (catalog_entry.get("src") or catalog_entry.get("resolved_src"))
+                if catalog_entry is not None
+                else None
             )
+            export_name: str | None = None
+            if nbdmux_url and ref:
+                for row in _ramboot.exports_by_src(nbdmux_url):
+                    if row.get("status") != "ready":
+                        continue
+                    # Prefer matching by src_url (canonical since PR
+                    # #33); fall back to name==ref for legacy exports
+                    # still keyed on the ref.
+                    if entry_src and row.get("src_url") == entry_src:
+                        export_name = str(row.get("name") or "") or None
+                        break
+                    if row.get("name") == ref:
+                        export_name = ref
+                        break
+            ramboot_ready = export_name is not None
             if nbdmux_url and ref and ramboot_ready:
                 # Derive the NBD host from the configured HTTP control
                 # plane URL: same hostname, port 10809 (nbd-server's
@@ -691,16 +714,18 @@ def create_app(
                     nbd_host=nbd_host,
                     nbd_port=10809,
                     image_ref=ref,
+                    export_name=export_name,
                     overlay_size=overlay_size,
                 )
                 offer_kind = "ramboot"
                 offer_summary = (
-                    f"{normalised} offered ramboot via nbd://{nbd_host}:10809/{ref[:8]}..."
+                    f"{normalised} offered ramboot via nbd://{nbd_host}:10809/{export_name}"
                 )
                 offer_details = {
                     "offer": "ramboot",
                     "nbd_endpoint": f"tcp://{nbd_host}:10809",
                     "image_ref": ref,
+                    "export_name": export_name,
                     "overlay_size": overlay_size,
                 }
             else:
@@ -711,8 +736,10 @@ def create_app(
                     reason = "nbdmux URL not configured"
                 elif not ref:
                     reason = "no bty_image_ref bound"
+                elif catalog_entry is None:
+                    reason = "catalog entry not in withcache"
                 else:
-                    reason = "image not pre-warmed yet"
+                    reason = "no ready nbdmux export for this src"
                 offer_summary = f"{normalised} offered tui (boot_mode=ramboot but {reason})"
                 offer_details = {
                     "offer": "bty-tui",
@@ -1650,12 +1677,39 @@ def create_app(
     def upsert_machine(mac: str, body: _models.MachineUpsert, request: Request) -> _models.Machine:
         normalised = _normalise_mac(mac)
         now = now_iso()
-        # Ramboot bind-time gate: the bound ref must already be
-        # registered with nbdmux at ``status='ready'``. nbdmux owns
-        # the warming pipeline since v0.2.0; bty just validates. An
-        # operator who has not yet populated nbdmux gets a 422 here
-        # rather than a silent "would-boot-but-misconfigured" record
-        # that surfaces only at PXE chain time.
+        # Downloaded-first gate: when the operator binds a catalog
+        # entry AND that entry is in withcache's catalog, refuse if
+        # withcache hasn't downloaded the bytes yet. Since withcache
+        # v0.10.0 there is no auto-fetch on /b/<url> miss, so the
+        # flash chain or the nbdmux export would just 404 at boot
+        # time. Refs not in the catalog fall through -- the plan
+        # endpoint already handles that with an interactive-mode
+        # fallback, and disallowing bogus refs here would break
+        # tests that stage machines before adding entries.
+        _flashable_modes = ("bty-flash-always", "bty-flash-once", "ramboot")
+        catalog_entry: dict[str, Any] | None = None
+        if body.boot_mode in _flashable_modes and body.bty_image_ref:
+            catalog = request.app.state.withcache_catalog
+            catalog_entry = catalog.get_by_ref(body.bty_image_ref)
+            if catalog_entry is not None and not catalog_entry.get("downloaded_at"):
+                withcache_url = catalog.withcache_url or "(unset)"
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"catalog entry {catalog_entry.get('name')!r} has not been "
+                        f"downloaded on withcache side; boot_mode={body.boot_mode} "
+                        f"needs the bytes present. Hit Download on "
+                        f"{withcache_url}/ui/catalog before binding."
+                    ),
+                )
+        # Ramboot bind-time gate: also needs the entry registered as
+        # an nbdmux export at status='ready'. nbdmux owns the
+        # decompress + register pipeline; bty validates. Since PR
+        # #33 the export is keyed on src_url (not the ref), so we
+        # match by the entry's src rather than by ref. If the ref
+        # isn't in the catalog, we still enforce the nbdmux-known
+        # requirement using the ref-as-name legacy fallback so
+        # tests that stage before seeding still exercise the check.
         if body.boot_mode == "ramboot" and body.bty_image_ref:
             with _db.open_db(state_path) as _conn:
                 nbdmux_url = _settings_store.resolve_nbdmux_url(_conn)
@@ -1674,17 +1728,35 @@ def create_app(
                     status_code=502,
                     detail=f"ramboot: nbdmux unreachable: {exc}",
                 ) from exc
-            if not any(
-                e.get("name") == body.bty_image_ref and e.get("status") == "ready" for e in exports
-            ):
+            entry_src = (
+                catalog_entry.get("src") or catalog_entry.get("resolved_src")
+                if catalog_entry is not None
+                else None
+            )
+
+            def _export_matches(e: dict[str, Any]) -> bool:
+                if e.get("status") != "ready":
+                    return False
+                # Prefer matching by src_url (canonical since PR #33).
+                # Fall back to name==ref for legacy exports still
+                # keyed on the ref.
+                if entry_src and e.get("src_url") == entry_src:
+                    return True
+                return e.get("name") == body.bty_image_ref
+
+            if not any(_export_matches(e) for e in exports):
+                subject_desc = (
+                    f"catalog entry {catalog_entry.get('name')!r}"
+                    if catalog_entry is not None
+                    else f"ref {body.bty_image_ref[:8]}..."
+                )
                 raise HTTPException(
                     status_code=422,
                     detail=(
-                        f"ramboot: ref {body.bty_image_ref[:8]}... is not "
-                        f"registered with nbdmux at status='ready'. "
-                        f"Warm it on nbdmux's /ui/exports (or POST /exports "
-                        f"to nbdmux at {nbdmux_url}/) before binding this "
-                        f"machine to ramboot."
+                        f"ramboot: {subject_desc} is not registered with nbdmux "
+                        f"at status='ready'. Pick it in nbdmux's /ui/exports "
+                        f"(or POST /exports to nbdmux at {nbdmux_url}/) before "
+                        f"binding this machine to ramboot."
                     ),
                 )
         with _db.open_db(state_path) as conn:
