@@ -3,10 +3,10 @@
 {% block title %}Images - bty-web{% endblock %}
 
 {% block subnav %}
-{# Left: in-page jump links. Right: the three add-paths (Add image
-   / Upload catalog / Fetch catalog), moved here from the card
-   header so the page-level actions live in the page chrome and
-   the card-body stays focused on the catalog table. #}
+{# Left: in-page jump links. Right: a single "Sync from withcache"
+   action -- adds / edits / deletes happen on the withcache side
+   (single source of truth since v0.66.0); bty is a read-only cache
+   that refreshes on demand or at startup. #}
 <nav class="navbar subnav-strip" aria-label="Section sub-navigation">
     <div class="container">
         <span class="subnav-jumps d-flex align-items-center flex-wrap">
@@ -15,15 +15,10 @@
             <a href="#images-activity">Activity</a>
         </span>
         <span class="subnav-actions d-flex flex-wrap align-items-center gap-2 ms-auto">
-            <form method="post" action="/ui/catalog/entries"
-                  class="d-flex align-items-center gap-1 m-0">
-                <input type="text" required class="form-control form-control-sm"
-                       id="image_url" name="image_url"
-                       style="max-width: 18rem; min-width: 0;"
-                       placeholder="https://...img.gz | oras://owner/repo:tag"
-                       title="http(s):// trusts the upstream bytes on first flash; oras:// resolves the OCI manifest digest at add time.">
-                <button type="submit" class="btn btn-sm btn-primary flex-shrink-0 text-nowrap">
-                    <i class="bi bi-cloud-plus me-1"></i>Add image
+            <form method="post" action="/ui/catalog/refresh" class="m-0">
+                <button type="submit" class="btn btn-sm btn-outline-primary text-nowrap"
+                        title="Re-fetch the catalog from withcache and refresh bty's in-memory cache.">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Sync from withcache
                 </button>
             </form>
         </span>
@@ -37,12 +32,13 @@
     The image catalog. Each entry references a URL (https or oras)
     the live env flashes from. bty-web doesn't host image bytes,
     and since v0.66.0 doesn't hold the catalog either -- withcache
-    is the single source of truth for both bytes and manifest, and
-    the <em>Add image</em> form pushes entries into withcache's
-    catalog API. The <em>Warm</em> column and per-row
-    <em>Pre-warm</em> action drive nbdmux's ramboot warm pipeline;
-    a machine bound to a ref in ramboot mode boots as soon as its
-    row shows <em>ready</em>.
+    is the single source of truth for both bytes and manifest.
+    Adds / edits happen on the withcache server's
+    <code>/ui/catalog</code>; the <em>Sync from withcache</em>
+    action above re-fetches bty's in-memory copy on demand. The
+    <em>Warm</em> column and per-row <em>Pre-warm</em> action drive
+    nbdmux's ramboot warm pipeline; a machine bound to a ref in
+    ramboot mode boots as soon as its row shows <em>ready</em>.
 {% endcall %}
 {% endblock %}
 
@@ -170,28 +166,22 @@
                         {% endif %}
                         {% if entry_src %}
                         <button type="button"
-                                class="btn btn-sm btn-outline-secondary bty-catalog-entry-check-btn me-1"
+                                class="btn btn-sm btn-outline-secondary bty-catalog-entry-check-btn"
                                 data-src="{{ entry_src }}"
                                 title="Check whether the origin is reachable and whether withcache already holds it (the check also warms an auto-fetch withcache)."
                                 aria-label="Check origin reachability and withcache status">
                             <i class="bi bi-arrow-repeat"></i> Check
                         </button>
                         {% endif %}
-                        <button type="button"
-                                class="btn btn-sm btn-outline-danger bty-catalog-entry-delete-btn"
-                                {% if entry_src %}data-src="{{ entry_src }}"{% endif %}
-                                title="Remove this entry from the catalog."
-                                aria-label="Remove this entry from the catalog">
-                            <i class="bi bi-trash"></i>
-                        </button>
                     </td>
                 </tr>
                 {% endfor %}
                 {% if not unified %}
                 <tr><td colspan="8" class="text-muted text-center py-3">
-                    No catalog entries yet. Use <strong>Add image</strong>,
-                    <strong>Upload catalog</strong>, or
-                    <strong>Fetch latest catalog</strong> in the header above.
+                    No catalog entries yet. Add entries on the withcache
+                    server's <code>/ui/catalog</code> page (single
+                    source of truth), then hit <strong>Sync from
+                    withcache</strong> above.
                 </td></tr>
                 {% endif %}
             </tbody>
@@ -243,30 +233,6 @@
     }
 
     document.addEventListener("click", function (ev) {
-        var entryDeleteBtn = ev.target.closest(".bty-catalog-entry-delete-btn");
-        if (entryDeleteBtn) {
-            ev.preventDefault();
-            var src = entryDeleteBtn.getAttribute("data-src");
-            if (!confirm("Remove this entry from the catalog?\n\n" + src)) return;
-            entryDeleteBtn.disabled = true;
-            fetch("/catalog/entries?src=" + encodeURIComponent(src), {
-                method: "DELETE",
-                credentials: "same-origin",
-            }).then(function (resp) {
-                if (resp.ok) {
-                    window.location.reload();
-                    return;
-                }
-                resp.text().then(function (body) {
-                    var msg;
-                    try { msg = JSON.parse(body).detail || body; }
-                    catch (_e) { msg = body || ("HTTP " + resp.status); }
-                    alert("Could not remove entry:\n\n" + msg);
-                    entryDeleteBtn.disabled = false;
-                });
-            }).catch(function () { entryDeleteBtn.disabled = false; });
-            return;
-        }
         var checkBtn = ev.target.closest(".bty-catalog-entry-check-btn");
         if (checkBtn) {
             ev.preventDefault();

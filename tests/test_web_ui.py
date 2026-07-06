@@ -304,18 +304,21 @@ def test_ui_dashboard_state_row_green_when_migrated_and_valid(
 
 
 def test_ui_images_is_catalog_listing_only(client: TestClient) -> None:
-    """``/ui/images`` is the catalog listing plus the operator
-    Add-image form. Since v0.66.0 the catalog is single-sourced
-    from withcache, so the upload / fetch-release entry paths
-    live on withcache's /ui/catalog page instead."""
+    """``/ui/images`` is the catalog listing plus a Sync-from-
+    withcache action. Since v0.66.0 the catalog is single-sourced
+    from withcache: adds / edits / deletes happen on withcache's
+    /ui/catalog page and bty pulls a fresh copy via Sync."""
     _login(client)
     body = client.get("/ui/images").text
     assert 'aria-label="Section sub-navigation"' in body
     assert 'href="#images-list"' in body
     assert 'href="#images-activity"' in body
-    # Add-image form is the only local mutation surface now.
-    assert 'action="/ui/catalog/entries"' in body
-    assert 'id="image_url"' in body
+    # Sync-from-withcache is the only local mutation surface now.
+    assert 'action="/ui/catalog/refresh"' in body
+    assert "Sync from withcache" in body
+    # The removed Add-image form must not sneak back in.
+    assert 'action="/ui/catalog/entries"' not in body
+    assert 'id="image_url"' not in body
     # No live job tables on this page (those live on /ui/netboot for
     # release fetches and /ui/backups for backups).
     assert "bty-downloads-tbody" not in body
@@ -341,15 +344,14 @@ def test_worker_pages_exist_separately(client: TestClient) -> None:
         assert client.get(legacy).status_code == 404, legacy
 
 
-def test_ui_images_list_header_has_add_image_form(client: TestClient) -> None:
-    """The Images table header carries the Add-image form (URL push
-    into withcache). Bulk-catalog paths (upload TOML / fetch
-    release) live on withcache's own /ui/catalog page since v0.66.0."""
+def test_ui_images_list_header_has_sync_action(client: TestClient) -> None:
+    """The Images subnav carries a Sync-from-withcache action. Adds
+    / edits / deletes happen on withcache's /ui/catalog page since
+    v0.66.0; bty is a read-only cache that refreshes on demand."""
     _login(client)
     body = client.get("/ui/images").text
-    assert 'action="/ui/catalog/entries"' in body
-    assert 'id="image_url"' in body
-    assert "Add image" in body
+    assert 'action="/ui/catalog/refresh"' in body
+    assert "Sync from withcache" in body
 
 
 def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
@@ -459,15 +461,15 @@ def test_subnavs_drop_the_redundant_list_pill(client: TestClient) -> None:
 
 def test_ui_images_ignores_unknown_query_params(client: TestClient) -> None:
     """``?section=...`` was the old per-tab selector. With the page
-    merged into the simple catalog list + three add-paths, query
-    params are ignored: a bookmark / typo / scripted call must NOT
-    500 the page."""
+    merged into the simple catalog list + Sync action, query params
+    are ignored: a bookmark / typo / scripted call must NOT 500 the
+    page."""
     _login(client)
     r = client.get("/ui/images?section=garbage")
     assert r.status_code == 200
     body = r.text
-    # The header add-form is still rendered.
-    assert 'id="image_url"' in body
+    # The Sync-from-withcache action is still rendered.
+    assert 'action="/ui/catalog/refresh"' in body
     assert 'aria-label="Section sub-navigation"' in body
 
 

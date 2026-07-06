@@ -52,7 +52,6 @@ from bty.web._auth import SESSION_AUTHED_KEY
 from bty.web._models import (
     BOOT_MODES,
     DEFAULT_BOOT_MODE,
-    CatalogEntryAdd,
     MachineUpsert,
 )
 from bty.web._reqctx import client_ip as _client_ip
@@ -229,7 +228,7 @@ def register_ui_routes(
             # Same ``kind LIKE '%failed'`` predicate the /ui/events
             # ``?failed=1`` filter uses (list_events(failed_only=True)),
             # so the "Review errors" deep link lands on exactly this
-            # family: auth.login.failed / catalog.entry.add.failed /
+            # family: auth.login.failed / catalog.refresh.failed /
             # netboot.artifacts.fetch.failed / settings.config.failed /
             # backup.failed.
             error_event_count = _events_log.count_unacknowledged_failures(conn)
@@ -1107,141 +1106,61 @@ def register_ui_routes(
         }
 
     @app.post(
-        "/ui/catalog/entries",
+        "/ui/catalog/refresh",
         include_in_schema=False,
         dependencies=[Depends(require_ui_auth)],
     )
-    def ui_catalog_entry_add(
-        request: Request,
-        image_url: Annotated[str, Form()],
-        sha_url: Annotated[str, Form()] = "",
-    ) -> RedirectResponse:
-        """Form-style POST behind the "Add image by URL" form on
-        /ui/images. Pushes the entry into withcache (the single
-        source of truth for the catalog) and refreshes bty's
-        in-memory cache so /ui/images picks up the new row on the
-        next render.
+    def ui_catalog_refresh(request: Request) -> RedirectResponse:
+        """Re-fetch the catalog from withcache and refresh bty's
+        in-memory cache.
 
-        Optional ``sha_url`` fetches + parses a checksum manifest
-        for the digest; empty string is treated as None.
-        Validation runs through the same :class:`CatalogEntryAdd`
-        Pydantic model so ``ftp://`` / host-less URLs / non-http
-        schemes get rejected before we round-trip to withcache.
+        Adds / edits / deletes happen on the withcache server's
+        ``/ui/catalog`` page (single source of truth since v0.66.0);
+        this endpoint is the "pull the latest" affordance on the bty
+        side. A transport failure preserves the prior cache and
+        surfaces the error on the redirect + in the events log.
         """
         from withcache import client as _wc_client
-        from withcache import oras as _oras
 
-        from bty import catalog as _catalog
-        from bty.web._helpers import head_content_length
-
-        cleaned_sha_url = sha_url.strip() or None
-        try:
-            validated = CatalogEntryAdd(image_url=image_url, sha_url=cleaned_sha_url)
-        except ValueError as exc:
+        cat = request.app.state.withcache_catalog
+        if not cat.configured:
             return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"validation failed: {exc}", safe=""),
+                "/ui/images?error="
+                + urllib.parse.quote(
+                    "withcache URL not configured; set it on /ui/settings.", safe=""
+                ),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        image_url = validated.image_url
-        cleaned_sha_url = validated.sha_url
-
-        # Build the entry payload. ``oras://`` short-circuits to
-        # resolve the manifest so we get digest / size / title from
-        # the registry; plain https reads Content-Length via HEAD
-        # and (optionally) fetches the sha manifest.
-        entry: dict[str, Any] = {"src": image_url}
-        if image_url.startswith("oras://"):
-            try:
-                resolved = _oras.resolve_ref(image_url)
-            except _oras.OrasError as exc:
-                return RedirectResponse(
-                    "/ui/images?error="
-                    + urllib.parse.quote(f"oras resolve failed: {exc}", safe=""),
-                    status_code=status.HTTP_303_SEE_OTHER,
-                )
-            ref = _oras.parse_ref(image_url)
-            name = resolved.title or ref.repository.rsplit("/", 1)[-1]
-            entry.update(
-                {
-                    "name": name,
-                    "resolved_src": resolved.blob_url,
-                    "sha256": resolved.digest.removeprefix("sha256:"),
-                    "format": bty_images.detect_format(Path(name)) or "img.gz",
-                    "size_bytes": resolved.size,
-                }
-            )
-        else:
-            name = Path(urllib.parse.urlparse(image_url).path).name
-            if not name:
-                return RedirectResponse(
-                    "/ui/images?error="
-                    + urllib.parse.quote(
-                        "image_url must end in a filename component "
-                        "(e.g. https://example.com/path/foo.img.gz)",
-                        safe="",
-                    ),
-                    status_code=status.HTTP_303_SEE_OTHER,
-                )
-            if cleaned_sha_url is not None:
-                try:
-                    sha256 = _catalog.fetch_sha256_for_url(image_url, cleaned_sha_url)
-                except _catalog.CatalogError as exc:
-                    return RedirectResponse(
-                        "/ui/images?error="
-                        + urllib.parse.quote(f"sha resolve failed: {exc}", safe=""),
-                        status_code=status.HTTP_303_SEE_OTHER,
-                    )
-                if sha256:
-                    entry["sha256"] = sha256
-            fmt = bty_images.detect_format(Path(name))
-            if fmt:
-                entry["format"] = fmt
-            size_bytes = head_content_length(image_url)
-            if size_bytes is not None:
-                entry["size_bytes"] = size_bytes
-            entry["name"] = name
-            entry["resolved_src"] = image_url
-
         try:
-            request.app.state.withcache_catalog.add(entry)
+            cat.refresh()
         except _wc_client.WithcacheError as exc:
             error_summary = str(exc)
             with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
-                    kind="catalog.entry.add.failed",
-                    summary=f"catalog entry add failed: {entry.get('name')}: {error_summary}",
+                    kind="catalog.refresh.failed",
+                    summary=f"catalog refresh from withcache failed: {error_summary}",
                     subject_kind="catalog",
-                    subject_id=image_url,
+                    subject_id=cat.withcache_url or "",
                     actor="operator",
                     source_ip=_client_ip(request),
-                    details={"name": entry.get("name"), "error": error_summary},
+                    details={"error": error_summary},
                 )
                 conn.commit()
             return RedirectResponse(
                 "/ui/images?error=" + urllib.parse.quote(error_summary, safe=""),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
-        except RuntimeError as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(str(exc), safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
         with _db.open_db(state_path) as conn:
             _events_log.record(
                 conn,
-                kind="catalog.entry.added",
-                summary=f"catalog entry added: {entry.get('name')}",
+                kind="catalog.refreshed",
+                summary=f"catalog refreshed from withcache ({len(cat.entries)} entries)",
                 subject_kind="catalog",
-                subject_id=image_url,
+                subject_id=cat.withcache_url or "",
                 actor="operator",
                 source_ip=_client_ip(request),
-                details={
-                    "name": entry.get("name"),
-                    "sha256": entry.get("sha256"),
-                    "format": entry.get("format"),
-                    "size_bytes": entry.get("size_bytes"),
-                },
+                details={"entry_count": len(cat.entries)},
             )
             conn.commit()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)

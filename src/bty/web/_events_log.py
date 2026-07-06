@@ -16,7 +16,7 @@ Conventions:
 
 - ``kind`` is a dotted lowercase namespace, e.g.
   ``machine.discovered``, ``machine.flashed``,
-  ``catalog.entry.added``, ``netboot.artifacts.fetched``. Stable
+  ``catalog.refreshed``, ``netboot.artifacts.fetched``. Stable
   strings; the UI keys badge colours off them.
 - ``subject_kind`` + ``subject_id`` together identify the entity
   the event is about. ``machine`` / mac, ``image`` / sha or name,
@@ -100,8 +100,8 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "netboot.pxe.plan",
     "netboot.flasher.armed",
     "pxe.client.orphan",
-    "catalog.entry.added",
-    "catalog.entry.add.failed",
+    "catalog.refreshed",
+    "catalog.refresh.failed",
     "netboot.artifacts.fetched",
     "netboot.artifacts.fetch.requested",
     "netboot.artifacts.fetch.started",
@@ -338,7 +338,7 @@ def list_events(
     if failed_only:
         # Every failure kind ends in ``.failed`` (dotted, since
         # v0.33.x normalised the earlier underscore form):
-        # ``auth.login.failed``, ``catalog.entry.add.failed``,
+        # ``auth.login.failed``, ``catalog.refresh.failed``,
         # ``netboot.artifacts.fetch.failed``, ``backup.failed``, etc.
         # ``%failed`` matches the suffix; a stricter check (``%.failed``)
         # would be marginally cleaner but ``failed`` as a full-token
