@@ -104,7 +104,12 @@ def main(args, cijoe):
     image = cfg.get("bty_image", "bty-web:pxetest")
     withcache_image = cfg.get("withcache_image", WITHCACHE_IMAGE)
     seed_base = f"http://127.0.0.1:{BTY_HTTP_PORT}"
-    withcache_base = f"http://127.0.0.1:{WITHCACHE_HTTP_PORT}"
+    # The withcache URL bty embeds in the flash plan is fetched by
+    # the CLIENT VM, not by bty itself, so it must be reachable from
+    # the bridge network. Withcache on --network=host binds to
+    # 0.0.0.0:8081 so the bridge IP works for both bty (which reaches
+    # it via loopback semantics) and the client VM (bridge).
+    withcache_base = f"http://{cfg['server_pxe_ip']}:{WITHCACHE_HTTP_PORT}"
     client_log = workspace / "client.serial.log"
 
     container = None
