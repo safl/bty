@@ -170,7 +170,7 @@ class WithcacheCatalog:
         """
         if self._url is None:
             raise RuntimeError("withcache URL not configured; cannot add catalog entry")
-        result = _wc_client.add_catalog_entry(self._url, entry)
+        result: dict[str, Any] = _wc_client.add_catalog_entry(self._url, entry)
         self.refresh()
         return result
 
@@ -183,3 +183,32 @@ class WithcacheCatalog:
             raise RuntimeError("withcache URL not configured; cannot delete catalog entry")
         _wc_client.delete_catalog_entry(self._url, name)
         self.refresh()
+
+    def _seed_for_tests(self, entries: list[dict[str, Any]]) -> None:
+        """Populate the in-memory cache directly, bypassing the HTTP
+        round-trip. TEST-ONLY: gives fixtures a way to inject rows
+        without spinning up a withcache TestClient. Each entry is
+        enriched with ``bty_image_ref`` the same way :meth:`refresh`
+        would."""
+        enriched: list[dict[str, Any]] = []
+        by_ref: dict[str, dict[str, Any]] = {}
+        by_name: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            src = entry.get("src")
+            if not isinstance(src, str) or not src:
+                continue
+            try:
+                ref = _bty_catalog.image_ref_for_src(src)
+            except (ValueError, TypeError):
+                continue
+            e = {**entry, "bty_image_ref": ref}
+            enriched.append(e)
+            by_ref[ref] = e
+            name = entry.get("name")
+            if isinstance(name, str) and name:
+                by_name[name] = e
+        with self._lock:
+            self._entries = enriched
+            self._entries_by_ref = by_ref
+            self._entries_by_name = by_name
+            self._last_error = None

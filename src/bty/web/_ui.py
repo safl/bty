@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -218,11 +217,11 @@ def register_ui_routes(
     )
     def ui_dashboard(request: Request) -> HTMLResponse:
         unified = list_unified_images() if list_unified_images is not None else []
+        catalog_entry_count = len(request.app.state.withcache_catalog.entries)
         with _db.open_db(state_path) as conn:
             # Live panel context (machine summary + image breakdown),
             # shared with the SSE publisher so the two never drift.
             counts = dashboard_counts_context(conn, unified)
-            catalog_entry_count = conn.execute("SELECT COUNT(*) FROM catalog_entries").fetchone()[0]
             # Error-event count for the Health Monitoring panel: only
             # *unacknowledged* failures count toward the tripwire, so
             # an operator can mark a known / resolved failure as seen
@@ -546,16 +545,24 @@ def register_ui_routes(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"no machine record for {normalised}",
             )
-        # The picker lists catalog_entries rows by ``bty_image_ref``
-        # (provenance ID). Operator binding stays valid across rolling
-        # tags / re-fetches; the content sha (``disk_image_sha``)
-        # surfaces alongside the ref when known.
-        with _db.open_db(state_path) as conn:
-            catalog_rows = conn.execute(
-                "SELECT bty_image_ref, name, format, src, disk_image_sha, size_bytes "
-                "FROM catalog_entries ORDER BY name"
-            ).fetchall()
-        catalog_options = [dict(r) for r in catalog_rows]
+        # The picker lists withcache's catalog entries by
+        # ``bty_image_ref`` (provenance ID). Operator binding stays
+        # valid across rolling tags / re-fetches; the content sha
+        # (``sha256``) surfaces alongside the ref when known.
+        catalog_options = [
+            {
+                "bty_image_ref": e.get("bty_image_ref"),
+                "name": e.get("name"),
+                "format": e.get("format"),
+                "src": e.get("src"),
+                "disk_image_sha": e.get("sha256"),
+                "size_bytes": e.get("size_bytes"),
+            }
+            for e in sorted(
+                request.app.state.withcache_catalog.entries,
+                key=lambda x: (x.get("name") or "").lower(),
+            )
+        ]
         # Reads ``?error=<msg>`` so the upsert form's bounce-on-
         # validation-failure renders a flash banner. Same shape as
         # /ui/images: Jinja autoescape covers ``flash`` so a
@@ -1110,26 +1117,24 @@ def register_ui_routes(
         sha_url: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
         """Form-style POST behind the "Add image by URL" form on
-        /ui/images. Routes through the same logic as the JSON API
-        ``POST /catalog/entries``: optional sha_url resolves to a
-        sha256, optional ``Content-Length`` HEAD probes size, the
-        row lands in ``catalog_entries``. Operator-friendly empty-
-        string in ``sha_url`` is treated as None.
+        /ui/images. Pushes the entry into withcache (the single
+        source of truth for the catalog) and refreshes bty's
+        in-memory cache so /ui/images picks up the new row on the
+        next render.
 
+        Optional ``sha_url`` fetches + parses a checksum manifest
+        for the digest; empty string is treated as None.
         Validation runs through the same :class:`CatalogEntryAdd`
-        Pydantic model the JSON endpoint uses, so the form rejects
-        ``ftp://`` / host-less URLs / non-http schemes identically.
+        Pydantic model so ``ftp://`` / host-less URLs / non-http
+        schemes get rejected before we round-trip to withcache.
         """
+        from withcache import client as _wc_client
         from withcache import oras as _oras
 
         from bty import catalog as _catalog
         from bty.web._helpers import head_content_length
 
         cleaned_sha_url = sha_url.strip() or None
-        # Apply the same Pydantic validation the JSON API uses
-        # (URL scheme + host pattern, both fields). Pydantic
-        # raises a ``ValidationError`` (subclass of ``ValueError``)
-        # if a pattern doesn't match.
         try:
             validated = CatalogEntryAdd(image_url=image_url, sha_url=cleaned_sha_url)
         except ValueError as exc:
@@ -1140,17 +1145,11 @@ def register_ui_routes(
         image_url = validated.image_url
         cleaned_sha_url = validated.sha_url
 
-        # Variables shared across the oras / http branches. Declared
-        # up front so mypy sees a single binding (the oras branch
-        # narrows ``sha256`` / ``fmt`` / ``size_bytes`` to concrete
-        # types, which would clash with the http branch's re-
-        # declarations).
-        sha256: str | None = None
-        fmt: str | None = None
-        size_bytes: int | None = None
-        # ``oras://`` short-circuit: resolve via withcache.oras and write
-        # the row with the manifest-derived digest / name / size /
-        # format. Mirrors the JSON endpoint's oras branch verbatim.
+        # Build the entry payload. ``oras://`` short-circuits to
+        # resolve the manifest so we get digest / size / title from
+        # the registry; plain https reads Content-Length via HEAD
+        # and (optionally) fetches the sha manifest.
+        entry: dict[str, Any] = {"src": image_url}
         if image_url.startswith("oras://"):
             try:
                 resolved = _oras.resolve_ref(image_url)
@@ -1160,160 +1159,91 @@ def register_ui_routes(
                     + urllib.parse.quote(f"oras resolve failed: {exc}", safe=""),
                     status_code=status.HTTP_303_SEE_OTHER,
                 )
-            sha256 = resolved.digest.removeprefix("sha256:")
             ref = _oras.parse_ref(image_url)
             name = resolved.title or ref.repository.rsplit("/", 1)[-1]
-            fmt = bty_images.detect_format(Path(name)) or "img.gz"
-            size_bytes = resolved.size
-            now = _now_iso()
-            try:
-                bty_image_ref = _catalog.image_ref_for_src(image_url)
-            except ValueError as exc:
+            entry.update(
+                {
+                    "name": name,
+                    "resolved_src": resolved.blob_url,
+                    "sha256": resolved.digest.removeprefix("sha256:"),
+                    "format": bty_images.detect_format(Path(name)) or "img.gz",
+                    "size_bytes": resolved.size,
+                }
+            )
+        else:
+            name = Path(urllib.parse.urlparse(image_url).path).name
+            if not name:
                 return RedirectResponse(
-                    "/ui/images?error=" + urllib.parse.quote(f"invalid image_url: {exc}", safe=""),
+                    "/ui/images?error="
+                    + urllib.parse.quote(
+                        "image_url must end in a filename component "
+                        "(e.g. https://example.com/path/foo.img.gz)",
+                        safe="",
+                    ),
                     status_code=status.HTTP_303_SEE_OTHER,
                 )
-            with _db.open_db(state_path) as conn:
+            if cleaned_sha_url is not None:
                 try:
-                    _db.insert_catalog_row(
-                        conn,
-                        bty_image_ref=bty_image_ref,
-                        src=image_url,
-                        resolved_src=resolved.blob_url,
-                        disk_image_sha=sha256,
-                        name=name,
-                        sha_url=None,
-                        format=fmt,
-                        size_bytes=size_bytes,
-                        description=None,
-                        added_at=now,
-                    )
-                    _events_log.record(
-                        conn,
-                        kind="catalog.entry.added",
-                        summary=f"catalog entry added (oras): {name}",
-                        subject_kind="catalog",
-                        subject_id=image_url,
-                        actor="operator",
-                        source_ip=_client_ip(request),
-                        details={
-                            "name": name,
-                            "bty_image_ref": bty_image_ref,
-                            "disk_image_sha": sha256,
-                            "format": fmt,
-                            "size_bytes": size_bytes,
-                        },
-                    )
-                    conn.commit()
-                except sqlite3.IntegrityError:
-                    # Audit the rejection too -- the JSON endpoint logs
-                    # its add failures, so the /ui/events trail should
-                    # not silently miss the form-post path.
-                    _events_log.record(
-                        conn,
-                        kind="catalog.entry.add.failed",
-                        summary=f"catalog entry add failed (duplicate): {name}",
-                        subject_kind="catalog",
-                        subject_id=image_url,
-                        actor="operator",
-                        source_ip=_client_ip(request),
-                        details={"name": name, "error": "already exists"},
-                    )
-                    conn.commit()
+                    sha256 = _catalog.fetch_sha256_for_url(image_url, cleaned_sha_url)
+                except _catalog.CatalogError as exc:
                     return RedirectResponse(
-                        "/ui/images?error=already+exists",
+                        "/ui/images?error="
+                        + urllib.parse.quote(f"sha resolve failed: {exc}", safe=""),
                         status_code=status.HTTP_303_SEE_OTHER,
                     )
-            return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
+                if sha256:
+                    entry["sha256"] = sha256
+            fmt = bty_images.detect_format(Path(name))
+            if fmt:
+                entry["format"] = fmt
+            size_bytes = head_content_length(image_url)
+            if size_bytes is not None:
+                entry["size_bytes"] = size_bytes
+            entry["name"] = name
+            entry["resolved_src"] = image_url
 
-        # Filename-required: same rule as the JSON ``add_catalog_entry``
-        # endpoint. ``https://example.com`` and
-        # ``https://example.com/`` produce empty ``Path.name`` and
-        # leave the catalog row with no useful display label.
-        name = Path(urllib.parse.urlparse(image_url).path).name
-        if not name:
-            return RedirectResponse(
-                "/ui/images?error="
-                + urllib.parse.quote(
-                    "image_url must end in a filename component "
-                    "(e.g. https://example.com/path/foo.img.gz)",
-                    safe="",
-                ),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-
-        if cleaned_sha_url is not None:
-            try:
-                sha256 = _catalog.fetch_sha256_for_url(image_url, cleaned_sha_url)
-            except _catalog.CatalogError as exc:
-                # ``urllib.parse.quote`` so the redirect URL is
-                # well-formed regardless of the exception text
-                # (which can carry spaces, special chars, or even
-                # newlines if upstream's reason phrase is weird).
-                return RedirectResponse(
-                    "/ui/images?error=" + urllib.parse.quote(f"sha resolve failed: {exc}", safe=""),
-                    status_code=status.HTTP_303_SEE_OTHER,
-                )
-
-        fmt = bty_images.detect_format(Path(name))
-        size_bytes = head_content_length(image_url)
-        now = _now_iso()
         try:
-            bty_image_ref = _catalog.image_ref_for_src(image_url)
-        except ValueError as exc:
-            return RedirectResponse(
-                "/ui/images?error=" + urllib.parse.quote(f"invalid image_url: {exc}", safe=""),
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
-        with _db.open_db(state_path) as conn:
-            try:
-                _db.insert_catalog_row(
-                    conn,
-                    bty_image_ref=bty_image_ref,
-                    src=image_url,
-                    resolved_src=image_url,
-                    disk_image_sha=sha256,
-                    name=name,
-                    sha_url=cleaned_sha_url,
-                    format=fmt,
-                    size_bytes=size_bytes,
-                    description=None,
-                    added_at=now,
-                )
-                _events_log.record(
-                    conn,
-                    kind="catalog.entry.added",
-                    summary=f"catalog entry added: {name}",
-                    subject_kind="catalog",
-                    subject_id=image_url,
-                    actor="operator",
-                    source_ip=_client_ip(request),
-                    details={
-                        "name": name,
-                        "bty_image_ref": bty_image_ref,
-                        "disk_image_sha": sha256,
-                        "format": fmt,
-                        "size_bytes": size_bytes,
-                    },
-                )
-                conn.commit()
-            except sqlite3.IntegrityError:
-                # Same audit-the-rejection rationale as the oras path.
+            request.app.state.withcache_catalog.add(entry)
+        except _wc_client.WithcacheError as exc:
+            error_summary = str(exc)
+            with _db.open_db(state_path) as conn:
                 _events_log.record(
                     conn,
                     kind="catalog.entry.add.failed",
-                    summary=f"catalog entry add failed (duplicate): {name}",
+                    summary=f"catalog entry add failed: {entry.get('name')}: {error_summary}",
                     subject_kind="catalog",
                     subject_id=image_url,
                     actor="operator",
                     source_ip=_client_ip(request),
-                    details={"name": name, "error": "already exists"},
+                    details={"name": entry.get("name"), "error": error_summary},
                 )
                 conn.commit()
-                return RedirectResponse(
-                    "/ui/images?error=already+exists",
-                    status_code=status.HTTP_303_SEE_OTHER,
-                )
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(error_summary, safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        except RuntimeError as exc:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(str(exc), safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        with _db.open_db(state_path) as conn:
+            _events_log.record(
+                conn,
+                kind="catalog.entry.added",
+                summary=f"catalog entry added: {entry.get('name')}",
+                subject_kind="catalog",
+                subject_id=image_url,
+                actor="operator",
+                source_ip=_client_ip(request),
+                details={
+                    "name": entry.get("name"),
+                    "sha256": entry.get("sha256"),
+                    "format": entry.get("format"),
+                    "size_bytes": entry.get("size_bytes"),
+                },
+            )
+            conn.commit()
         return RedirectResponse("/ui/images", status_code=status.HTTP_303_SEE_OTHER)
 
     # ----- ramboot pre-warm (per-image action buttons) --------------------
@@ -1336,16 +1266,14 @@ def register_ui_routes(
         ``?error=`` on the /ui/images redirect and land in the
         events log as ``ramboot.prewarm.failed``.
         """
+        entry = request.app.state.withcache_catalog.get_by_ref(ref)
+        if entry is None:
+            return RedirectResponse(
+                "/ui/images?error=" + urllib.parse.quote(f"unknown ref: {ref}", safe=""),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        row = {"src": entry.get("src"), "name": entry.get("name"), "format": entry.get("format")}
         with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT src, name, format FROM catalog_entries WHERE bty_image_ref = ?",
-                (ref,),
-            ).fetchone()
-            if row is None:
-                return RedirectResponse(
-                    "/ui/images?error=" + urllib.parse.quote(f"unknown ref: {ref}", safe=""),
-                    status_code=status.HTTP_303_SEE_OTHER,
-                )
             nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
         if not nbdmux_url:
             return RedirectResponse(
@@ -1407,16 +1335,14 @@ def register_ui_routes(
         The audit event carries ``subject_id=<catalog src>`` to
         stay symmetric with ``ramboot.prewarm.requested`` /
         ``.failed`` so a /ui/events filter on one src URL surfaces
-        the full lifecycle; the src is looked up from
-        ``catalog_entries`` when the row still exists (a
-        prior-DELETE leaves the row gone, in which case the event
-        falls back to the ref so the audit trail still lands).
+        the full lifecycle; the src is looked up from withcache's
+        catalog when the entry still exists (a prior-DELETE from
+        withcache leaves it gone, in which case the event falls
+        back to the ref so the audit trail still lands).
         """
+        entry = request.app.state.withcache_catalog.get_by_ref(ref)
+        src_for_audit = entry.get("src") if entry else ref
         with _db.open_db(state_path) as conn:
-            row = conn.execute(
-                "SELECT src FROM catalog_entries WHERE bty_image_ref = ?", (ref,)
-            ).fetchone()
-            src_for_audit = row["src"] if row is not None else ref
             nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
         if not nbdmux_url:
             return RedirectResponse(
