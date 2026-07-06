@@ -1897,6 +1897,31 @@ def create_app(
         publish_state_changed()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @app.post(
+        "/admin/withcache/refresh",
+        status_code=204,
+        dependencies=[Depends(require_auth)],
+    )
+    def admin_withcache_refresh(request: Request) -> Response:
+        """Re-poll the configured withcache and rebuild bty's
+        in-memory catalog cache.
+
+        Since v0.66.0 bty pulls the catalog from withcache at
+        process start; a running bty won't automatically see
+        entries added afterward. This admin endpoint lets an
+        operator (or an integration test) force a refresh after a
+        catalog change without restarting the process. No-op with
+        a 204 when withcache isn't configured.
+        """
+        try:
+            request.app.state.withcache_catalog.refresh()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"withcache refresh failed: {exc}",
+            ) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.get("/images", response_model=list[_models.ImageEntry])
     def list_images_endpoint(request: Request) -> list[_models.ImageEntry]:
         """Unified catalog listing.

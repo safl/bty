@@ -27,22 +27,26 @@ def test_unconfigured_refresh_is_noop() -> None:
     assert cat.entries == []
 
 
-def test_unconfigured_add_falls_back_to_local() -> None:
-    """When withcache isn't configured, add lands in the local cache
-    so standalone bty deploys (no sidecar) stay functional."""
+def test_unconfigured_add_raises() -> None:
+    """Since v0.67.1 the local-only fallback for add() is gone: the
+    catalog is single-sourced from withcache, so a standalone bty
+    deploy has nowhere to persist a new entry. Refusing at the
+    write path (rather than silently landing in an in-memory cache
+    that a restart would drop) matches the operator's mental
+    model."""
     cat = WithcacheCatalog(withcache_url=None)
-    cat.add({"name": "demo", "src": "https://example/demo.img.gz"})
-    assert len(cat.entries) == 1
-    assert cat.entries[0]["name"] == "demo"
+    with pytest.raises(RuntimeError, match="withcache URL not configured"):
+        cat.add({"name": "demo", "src": "https://example/demo.img.gz"})
 
 
-def test_unconfigured_delete_falls_back_to_local() -> None:
-    """Symmetric with add: delete drops from the local cache when
-    withcache isn't configured."""
+def test_unconfigured_delete_raises() -> None:
+    """Symmetric with add: delete refuses when withcache isn't
+    configured. Callers previously used delete on the local cache;
+    they now hit withcache's own DELETE endpoint or run against a
+    configured deploy."""
     cat = WithcacheCatalog(withcache_url=None)
-    cat.add({"name": "demo", "src": "https://example/demo.img.gz"})
-    cat.delete("demo")
-    assert cat.entries == []
+    with pytest.raises(RuntimeError, match="withcache URL not configured"):
+        cat.delete("demo")
 
 
 def test_configured_url_normalises_whitespace() -> None:
