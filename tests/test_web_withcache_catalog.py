@@ -27,16 +27,22 @@ def test_unconfigured_refresh_is_noop() -> None:
     assert cat.entries == []
 
 
-def test_unconfigured_add_raises() -> None:
+def test_unconfigured_add_falls_back_to_local() -> None:
+    """When withcache isn't configured, add lands in the local cache
+    so standalone bty deploys (no sidecar) stay functional."""
     cat = WithcacheCatalog(withcache_url=None)
-    with pytest.raises(RuntimeError, match="withcache URL not configured"):
-        cat.add({"name": "demo", "src": "https://example/demo.img.gz"})
+    cat.add({"name": "demo", "src": "https://example/demo.img.gz"})
+    assert len(cat.entries) == 1
+    assert cat.entries[0]["name"] == "demo"
 
 
-def test_unconfigured_delete_raises() -> None:
+def test_unconfigured_delete_falls_back_to_local() -> None:
+    """Symmetric with add: delete drops from the local cache when
+    withcache isn't configured."""
     cat = WithcacheCatalog(withcache_url=None)
-    with pytest.raises(RuntimeError, match="withcache URL not configured"):
-        cat.delete("demo")
+    cat.add({"name": "demo", "src": "https://example/demo.img.gz"})
+    cat.delete("demo")
+    assert cat.entries == []
 
 
 def test_configured_url_normalises_whitespace() -> None:
