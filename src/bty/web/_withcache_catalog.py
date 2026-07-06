@@ -163,13 +163,23 @@ class WithcacheCatalog:
     def add(self, entry: dict[str, Any]) -> dict[str, Any]:
         """POST an entry to withcache and refresh the cache.
 
-        Returns the withcache response body (the persisted entry).
-        Raises :class:`RuntimeError` when unconfigured. Any
-        withcache-side rejection (409 duplicate name, 400 missing
-        field, etc.) propagates as :class:`withcache.client.WithcacheError`.
+        When withcache isn't configured, falls back to a local-only
+        add: the entry lands in the in-memory cache directly and
+        the caller sees a functional add. This keeps standalone
+        bty deploys (no withcache sidecar) usable and unblocks the
+        PXE chain integration test which spins up only bty-web.
+
+        Returns the withcache response body when configured, or
+        the local-only entry echo otherwise. Any withcache-side
+        rejection (409 duplicate name, 400 missing field, etc.)
+        propagates as :class:`withcache.client.WithcacheError`.
         """
         if self._url is None:
-            raise RuntimeError("withcache URL not configured; cannot add catalog entry")
+            with self._lock:
+                existing = list(self._entries)
+            existing.append(entry)
+            self._seed_for_tests(existing)
+            return entry
         result: dict[str, Any] = _wc_client.add_catalog_entry(self._url, entry)
         self.refresh()
         return result
@@ -178,9 +188,16 @@ class WithcacheCatalog:
         """DELETE an entry by name from withcache and refresh the
         cache. 404 (no such entry) is treated as success so the
         operator's "make sure this is gone" intent is idempotent.
-        Raises :class:`RuntimeError` when unconfigured."""
+
+        Same local-only fallback as :meth:`add` when withcache
+        isn't configured -- the entry is dropped from the
+        in-memory cache and no HTTP round-trip fires.
+        """
         if self._url is None:
-            raise RuntimeError("withcache URL not configured; cannot delete catalog entry")
+            with self._lock:
+                existing = [e for e in self._entries if e.get("name") != name]
+            self._seed_for_tests(existing)
+            return
         _wc_client.delete_catalog_entry(self._url, name)
         self.refresh()
 

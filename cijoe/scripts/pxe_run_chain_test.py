@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from argparse import ArgumentParser
 from pathlib import Path
@@ -499,24 +500,42 @@ def _put_bytes(base, token, base_path, body, name):
 
 
 def _add_catalog_entry(base, token, image_url, sha_url):
-    """POST /catalog/entries with image_url + sha_url, return the
-    server-assigned ``bty_image_ref``. Mirrors the operator-add path
-    from the UI (``POST /ui/catalog/entries``) but via the JSON API."""
-    body = json.dumps({"image_url": image_url, "sha_url": sha_url}).encode("utf-8")
+    """POST /ui/catalog/entries (the form endpoint bty exposes since
+    the withcache-catalog cutover) and return the ``bty_image_ref``.
+
+    ``bty_image_ref`` is the sha256 of the canonicalised src URL, so
+    we compute it locally rather than parsing a JSON response (the
+    form endpoint 303s back to /ui/images and doesn't return a body).
+    The form still fires the add path -- which lands the entry in
+    bty's in-memory catalog cache via the withcache-catalog local
+    fallback that activates when no ``WITHCACHE_URL`` is
+    configured on the container.
+    """
+    body = urllib.parse.urlencode({"image_url": image_url, "sha_url": sha_url}).encode("utf-8")
     req = urllib.request.Request(
-        f"{base}/catalog/entries",
+        f"{base}/ui/catalog/entries",
         data=body,
         method="POST",
-        headers={"Cookie": f"bty-token={token}", "Content-Type": "application/json"},
+        headers={
+            "Cookie": f"bty-token={token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        if resp.status not in (200, 201):
-            raise RuntimeError(f"POST /catalog/entries returned {resp.status}")
-        payload = json.loads(resp.read().decode("utf-8"))
-    ref = payload.get("bty_image_ref")
-    if not isinstance(ref, str) or len(ref) != 64:
-        raise RuntimeError(f"catalog entry did not return a usable bty_image_ref: {payload!r}")
-    return ref
+    # Manual "no follow" so we get the 303 rather than the target's
+    # response. urllib doesn't have a stdlib "don't follow" knob
+    # short of a custom opener; catch HTTPError 3xx instead.
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if resp.status not in (200, 201, 303):
+                raise RuntimeError(f"POST /ui/catalog/entries returned {resp.status}")
+    except urllib.error.HTTPError as exc:
+        # urlopen raises on 3xx when the opener has no redirect handler
+        # for it; the 303 is the success signal here.
+        if exc.code != 303:
+            raise
+    from bty.catalog import image_ref_for_src
+
+    return image_ref_for_src(image_url)
 
 
 def _put_assignment(base, token, cfg, bty_image_ref):
