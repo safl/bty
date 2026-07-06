@@ -158,29 +158,6 @@ def test_ui_dashboard_renders_after_login(client: TestClient) -> None:
     assert "Machines" in body
 
 
-def test_ui_images_renders_default_catalog_url(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The /ui/images Fetch control surfaces the catalog URL (the
-    default points at nosi's /releases/latest/download/catalog.toml,
-    the upstream image-builder) in the button title + the fetch-
-    release form action. ``$BTY_BOOT_RELEASE_REPO`` controls only
-    the netboot repo, not the catalog URL."""
-    monkeypatch.setenv("BTY_BOOT_RELEASE_REPO", "")
-    _login(client)
-    r = client.get("/ui/images")
-    assert r.status_code == 200
-    body = r.text
-    assert "safl/nosi" in body
-    # Default tracks nosi's /releases/latest/ (since v0.61.2);
-    # byte-stability across operators is provided by withcache,
-    # not by pinning the URL into the bty release.
-    assert "/releases/latest/download/" in body
-    assert "/catalog.toml" in body
-    assert 'action="/ui/catalog/fetch-release"' in body
-
-
 def test_ui_dashboard_renders_with_zero_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -327,18 +304,17 @@ def test_ui_dashboard_state_row_green_when_migrated_and_valid(
 
 
 def test_ui_images_is_catalog_listing_only(client: TestClient) -> None:
-    """``/ui/images`` is the catalog listing plus three add-paths in
-    the header: Add image (URL), Upload catalog, Fetch latest catalog."""
+    """``/ui/images`` is the catalog listing plus the operator
+    Add-image form. Since v0.66.0 the catalog is single-sourced
+    from withcache, so the upload / fetch-release entry paths
+    live on withcache's /ui/catalog page instead."""
     _login(client)
     body = client.get("/ui/images").text
     assert 'aria-label="Section sub-navigation"' in body
     assert 'href="#images-list"' in body
     assert 'href="#images-activity"' in body
-    # Catalog actions in the list header: all three add-paths live here.
+    # Add-image form is the only local mutation surface now.
     assert 'action="/ui/catalog/entries"' in body
-    assert 'action="/ui/catalog/fetch-release"' in body
-    assert 'action="/ui/catalog/upload"' in body
-    assert 'accept=".toml"' in body
     assert 'id="image_url"' in body
     # No live job tables on this page (those live on /ui/netboot for
     # release fetches and /ui/backups for backups).
@@ -365,25 +341,15 @@ def test_worker_pages_exist_separately(client: TestClient) -> None:
         assert client.get(legacy).status_code == 404, legacy
 
 
-def test_ui_images_list_header_has_all_three_add_paths(client: TestClient) -> None:
-    """The Images table header carries the three add-paths in
-    order: Add image (URL), Upload catalog, Fetch latest catalog."""
+def test_ui_images_list_header_has_add_image_form(client: TestClient) -> None:
+    """The Images table header carries the Add-image form (URL push
+    into withcache). Bulk-catalog paths (upload TOML / fetch
+    release) live on withcache's own /ui/catalog page since v0.66.0."""
     _login(client)
     body = client.get("/ui/images").text
-    # All three forms.
     assert 'action="/ui/catalog/entries"' in body
     assert 'id="image_url"' in body
     assert "Add image" in body
-    assert 'action="/ui/catalog/upload"' in body
-    assert "Upload catalog" in body
-    assert 'accept=".toml"' in body
-    assert 'action="/ui/catalog/fetch-release"' in body
-    assert "Fetch latest catalog" in body
-    # Ordering: Add image is first, then Upload catalog, then Fetch.
-    pos_add = body.index('action="/ui/catalog/entries"')
-    pos_upload = body.index('action="/ui/catalog/upload"')
-    pos_fetch = body.index('action="/ui/catalog/fetch-release"')
-    assert pos_add < pos_upload < pos_fetch
 
 
 def test_top_level_nav_highlights_active_page(client: TestClient) -> None:
@@ -1045,29 +1011,21 @@ def test_ui_machine_detail_shows_bound_image_and_labels(client: TestClient) -> N
     """The identity card shows the bound image human-readably (name +
     format + human size) linked to the catalog, and the labels (as
     chips) next to the MAC -- not a bare cut-off ref/sha."""
-    from bty.web import _db as _bty_db
+    from bty.catalog import image_ref_for_src
 
     _login(client)
-    state_path = client.app.state.state_path  # type: ignore[attr-defined]
-    ref = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    with _bty_db.open_db(state_path) as conn:
-        conn.execute(
-            "INSERT INTO catalog_entries "
-            "(bty_image_ref, src, disk_image_sha, name, sha_url, format, "
-            "size_bytes, description, added_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                ref,
-                "oras://ghcr.io/safl/nosi/fedora:latest",
-                None,
-                "nosi fedora-sysdev (x86_64, rolling)",
-                None,
-                "img.gz",
-                2_606_593_716,
-                None,
-                "2026-05-22T00:00:00+00:00",
-            ),
-        )
-        conn.commit()
+    src = "oras://ghcr.io/safl/nosi/fedora:latest"
+    ref = image_ref_for_src(src)
+    entry = {
+        "name": "nosi fedora-sysdev (x86_64, rolling)",
+        "src": src,
+        "resolved_src": src,
+        "format": "img.gz",
+        "size_bytes": 2_606_593_716,
+    }
+    existing = list(client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
+    existing.append(entry)
+    client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]
     client.put(
         "/machines/aa:bb:cc:dd:ee:ff",
         json={"bty_image_ref": ref, "labels": ["lab-fedora-01"]},
@@ -1086,188 +1044,6 @@ def test_ui_machine_detail_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_ui_catalog_entry_form_rejects_bad_url(client: TestClient) -> None:
-    """The form-style endpoint at ``POST /ui/catalog/entries``
-    must apply the same Pydantic ``CatalogEntryAdd`` validation
-    as the JSON ``POST /catalog/entries`` endpoint -- the form
-    used to skip pattern validation entirely, accepting
-    ``ftp://`` and host-less URLs that the API rejects.
-
-    On validation failure the form 303s back to /ui/images with
-    a URL-encoded ``?error=`` query param; the redirect must be
-    well-formed regardless of the exception text. We follow the
-    redirect manually and assert the URL shape."""
-    _login(client)
-    r = client.post(
-        "/ui/catalog/entries",
-        data={"image_url": "ftp://example.invalid/foo.img.gz", "sha_url": ""},
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    location = r.headers["location"]
-    assert location.startswith("/ui/images?error="), location
-    # URL-encoded payload: spaces and special chars become %xx,
-    # so a raw space would be a sign of the un-quoted bug.
-    assert " " not in location
-
-    # Bare-host URL (no filename) should also bounce with a
-    # ``filename component`` flash.
-    r = client.post(
-        "/ui/catalog/entries",
-        data={"image_url": "https://example.invalid", "sha_url": ""},
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    location = r.headers["location"]
-    assert location.startswith("/ui/images?error="), location
-    assert "filename%20component" in location or "filename+component" in location
-
-
-def test_ui_catalog_entry_form_requires_auth(client: TestClient) -> None:
-    """Unauthed POST to /ui/catalog/entries bounces to /ui/login,
-    not 303 to /ui/images. Defence-in-depth: the JSON sibling at
-    POST /catalog/entries is also gated, but a logged-out form
-    must hit the same auth wall."""
-    r = client.post(
-        "/ui/catalog/entries",
-        data={"image_url": "https://example.invalid/x.img.gz", "sha_url": ""},
-    )
-    assert r.status_code == 303
-    assert r.headers["location"] == "/ui/login"
-
-
-def test_ui_catalog_entry_form_happy_path_lands_row_and_303s(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Valid image_url (no sha_url) -> 303 back to /ui/images and a
-    new ``catalog_entries`` row is visible via the JSON
-    ``GET /catalog/entries`` endpoint. Stubs the size-probe HEAD
-    so no real network call leaves the test."""
-    from bty.web import _helpers
-
-    monkeypatch.setattr(_helpers, "head_content_length", lambda url: None)
-    _login(client)
-    r = client.post(
-        "/ui/catalog/entries",
-        data={
-            "image_url": "https://example.invalid/charlie.img.gz",
-            "sha_url": "",
-        },
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"] == "/ui/images"
-    entries = client.get("/catalog/entries", cookies=AUTH).json()
-    assert any(e["src"] == "https://example.invalid/charlie.img.gz" for e in entries)
-    # The operator action is audited (debuggability) like the JSON path.
-    events = client.get(
-        "/events",
-        params={"subject_kind": "catalog", "kind": "catalog.entry.added"},
-        cookies=AUTH,
-    ).json()["events"]
-    assert any("charlie.img.gz" in e["summary"] for e in events)
-
-
-def test_ui_catalog_entry_form_oras_branch(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The oras:// branch of /ui/catalog/entries: resolve_ref is
-    called server-side; digest, name, format, size_bytes come from
-    the manifest; row inserts with the resolved metadata. Mirrors
-    the JSON ``POST /catalog/entries`` oras path but exercises the
-    Form-based UI handler (913-975 of _ui.py was the uncovered
-    block)."""
-    from withcache import oras as _oras
-
-    fake_blob = _oras.ResolvedBlob(
-        blob_url="https://ghcr.io/v2/safl/nosi/blobs/sha256:" + "a" * 64,
-        headers={"Authorization": "Bearer fake"},
-        digest="sha256:" + "a" * 64,
-        size=12345,
-        title="nosi-debian-sysdev.img.gz",
-    )
-    monkeypatch.setattr(_oras, "resolve_ref", lambda url: fake_blob)
-    _login(client)
-
-    r = client.post(
-        "/ui/catalog/entries",
-        data={"image_url": "oras://ghcr.io/safl/nosi/debian-sysdev:latest"},
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    assert r.headers["location"] == "/ui/images"
-
-    entries = client.get("/catalog/entries", cookies=AUTH).json()
-    oras_row = next(
-        (e for e in entries if e["src"] == "oras://ghcr.io/safl/nosi/debian-sysdev:latest"),
-        None,
-    )
-    assert oras_row is not None
-    assert oras_row["disk_image_sha"] == "a" * 64  # algorithm prefix stripped
-    assert oras_row["name"] == "nosi-debian-sysdev.img.gz"
-    assert oras_row["format"] == "img.gz"
-    assert oras_row["size_bytes"] == 12345
-
-
-def test_ui_catalog_entry_form_oras_resolve_failure(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If ``resolve_ref`` raises (registry unreachable, bad ref),
-    the operator gets a 303 back to /ui/images with an ``?error=``
-    query param -- NOT a 500 traceback. Pin the error-channel
-    shape so a refactor can't silently regress to a wedge."""
-    from withcache import oras as _oras
-
-    def _boom(url: str) -> _oras.ResolvedBlob:
-        raise _oras.OrasError("simulated registry unreachable")
-
-    monkeypatch.setattr(_oras, "resolve_ref", _boom)
-    _login(client)
-
-    r = client.post(
-        "/ui/catalog/entries",
-        data={"image_url": "oras://ghcr.io/bad/ref:latest"},
-        follow_redirects=False,
-    )
-    assert r.status_code == 303
-    loc = r.headers["location"]
-    assert loc.startswith("/ui/images?error=")
-    assert "oras+resolve+failed" in loc or "oras%20resolve%20failed" in loc
-
-
-def test_ui_catalog_entry_form_oras_duplicate_redirects_with_error(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Submitting the same oras URL twice hits the UNIQUE(src)
-    constraint. The handler catches the IntegrityError and
-    redirects with ``?error=already+exists`` rather than 500'ing.
-    """
-    from withcache import oras as _oras
-
-    fake_blob = _oras.ResolvedBlob(
-        blob_url="x",
-        headers={},
-        digest="sha256:" + "b" * 64,
-        size=10,
-        title="dup.img.gz",
-    )
-    monkeypatch.setattr(_oras, "resolve_ref", lambda url: fake_blob)
-    _login(client)
-
-    url = "oras://ghcr.io/safl/dup:latest"
-    r1 = client.post("/ui/catalog/entries", data={"image_url": url}, follow_redirects=False)
-    assert r1.status_code == 303
-    assert r1.headers["location"] == "/ui/images"
-
-    r2 = client.post("/ui/catalog/entries", data={"image_url": url}, follow_redirects=False)
-    assert r2.status_code == 303
-    assert "already+exists" in r2.headers["location"]
-
-
 # ---------- ramboot pre-warm (per-image action buttons) --------------------
 
 
@@ -1276,23 +1052,27 @@ def _seed_https_entry(
     monkeypatch: pytest.MonkeyPatch,
     url: str,
 ) -> str:
-    """Insert one https catalog entry via the form and return its
-    ``bty_image_ref``. Used by the pre-warm / warm-state tests below
-    so each test carries its own known ref.
+    """Seed one https catalog entry via the withcache-catalog
+    cache and return its ``bty_image_ref``. Used by the pre-warm /
+    warm-state tests below so each test carries its own known ref.
     """
-    from bty.web import _helpers
+    from pathlib import Path
+    from urllib.parse import urlparse
 
-    monkeypatch.setattr(_helpers, "head_content_length", lambda _u: None)
+    from bty.catalog import image_ref_for_src
+
     _login(client)
-    r = client.post(
-        "/ui/catalog/entries",
-        data={"image_url": url, "sha_url": ""},
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
-    entries = client.get("/catalog/entries", cookies=AUTH).json()
-    row = next(e for e in entries if e["src"] == url)
-    return row["bty_image_ref"]
+    name = Path(urlparse(url).path).name or "image.img.gz"
+    entry = {
+        "name": name,
+        "src": url,
+        "resolved_src": url,
+        "format": "img.gz",
+    }
+    existing = list(client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
+    existing.append(entry)
+    client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]
+    return image_ref_for_src(url)
 
 
 def test_ui_image_prewarm_calls_nbdmux_warm_export(
@@ -2669,32 +2449,6 @@ def test_ui_settings_ramboot_persists_and_clears(client: TestClient) -> None:
     assert "http://nbdmux.invalid:8082" not in body2
 
 
-def test_settings_upstream_override_drives_catalog_fetch_url(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The catalog-fetch handler resolves its URL from the
-    ``catalog_url`` override at request time. The URL is the only
-    catalog knob: no repo/tag composition, no rewriting."""
-    import urllib.error
-    import urllib.request
-
-    _login(client)
-    custom = "https://example.invalid/forks/catalog.toml"
-    client.post(
-        "/ui/settings/upstream",
-        data={"netboot_repo": "", "netboot_tag": "", "catalog_url": custom},
-    )
-    seen: list[str] = []
-
-    def _fake_urlopen(url, *a, **kw):  # type: ignore[no-untyped-def]
-        seen.append(url)
-        raise urllib.error.URLError("blocked in test")
-
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
-    client.post("/ui/catalog/fetch-release", follow_redirects=False)
-    assert seen == [custom]
-
-
 def test_ui_settings_requires_auth(client: TestClient) -> None:
     r = client.get("/ui/settings")
     assert r.status_code == 303
@@ -2932,59 +2686,6 @@ def test_ui_events_pagination_cursor_returns_older_rows(
     ).json()["events"]
     assert len(second) > 0
     assert all(e["id"] < smallest_on_page1 for e in second)
-
-
-def test_ui_machine_detail_dropdown_lists_manifest_entry_after_upload(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End-to-end of the auto-import fix from v0.19.1: upload a
-    catalog.toml, then open /ui/machines/{mac} and assert the
-    Image <select> contains an <option> for the manifest entry.
-    Pre-v0.19.1 the entry was visible on /ui/images (via merge)
-    but the machine-binding dropdown stayed empty for it.
-
-    Builds a separate app per-test because the manifest_path is
-    resolved at create_app() time from ``BTY_STATE_DIR``; the
-    shared client fixture's app was already built before this
-    test runs.
-    """
-    image_root = tmp_path / "images"
-    image_root.mkdir()
-    bty_state_dir = tmp_path / "bty-state"
-    bty_state_dir.mkdir()
-    monkeypatch.setenv("BTY_STATE_DIR", str(bty_state_dir))
-    monkeypatch.setenv("BTY_ADMIN_PASSWORD", TEST_PASSWORD)
-    fresh_app = create_app(
-        state_path=tmp_path / "state.db",
-        service_user=TEST_SERVICE_USER,
-        secret_key=TEST_SECRET_KEY,
-    )
-
-    with TestClient(fresh_app, follow_redirects=False) as c:
-        login = c.post("/ui/login", data={"password": TEST_PASSWORD})
-        assert login.status_code == 303
-        body = (
-            b"version = 1\n\n"
-            b"[[images]]\n"
-            b'name = "rolling-from-upload"\n'
-            b'src = "oras://ghcr.io/example/foo:latest"\n'
-            b'format = "img.gz"\n'
-        )
-        r = c.post(
-            "/ui/catalog/upload",
-            files={"file": ("catalog.toml", body, "application/toml")},
-        )
-        assert r.status_code == 303, r.text
-        # Discover a machine via /pxe so the detail page exists.
-        c.get("/pxe/aa:bb:cc:dd:ee:21")
-        detail = c.get("/ui/machines/aa:bb:cc:dd:ee:21")
-        assert detail.status_code == 200
-        body_html = detail.text
-        # The bty_image_ref <select> contains the manifest entry's
-        # name as an option label.
-        assert 'name="bty_image_ref"' in body_html
-        assert "rolling-from-upload" in body_html
 
 
 def test_ui_machine_delete_via_form_records_event(client: TestClient) -> None:
@@ -3574,12 +3275,14 @@ def test_catalog_entry_check_oras_heads_withcache_with_src(
     monkeypatch.setattr(_withcache, "is_cached", fake_is_cached)
 
     # Seed the catalog row so the Check button sees the persisted entry.
-    r = client.post(
-        "/catalog/entries",
-        json={"image_url": src},
-        cookies=AUTH,
-    )
-    assert r.status_code == 201, r.text
+    from pathlib import Path as _Path
+    from urllib.parse import urlparse as _urlparse
+
+    _login(client)
+    _name = _Path(_urlparse(src).path).name or "image.img.gz"
+    _existing = list(client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
+    _existing.append({"name": _name, "src": src, "resolved_src": src, "format": "img.gz"})
+    client.app.state.withcache_catalog._seed_for_tests(_existing)  # type: ignore[attr-defined]
 
     r = client.post("/ui/catalog/entries/check", data={"src": src}, cookies=AUTH)
     assert r.status_code == 200, r.text

@@ -15,8 +15,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 import bty
 from bty.web import _db
 
@@ -58,90 +56,6 @@ def test_init_db_creates_machine_labels_table(tmp_path: Path) -> None:
         indexes = {row[1] for row in conn.execute("PRAGMA index_list(machine_labels)")}
     assert cols == {"mac", "label"}
     assert "machine_labels_label_idx" in indexes
-
-
-def test_init_db_creates_catalog_entries_table(tmp_path: Path) -> None:
-    state = tmp_path / "state.db"
-    _db.init_db(state)
-    with sqlite3.connect(state) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(catalog_entries)")}
-    assert {"bty_image_ref", "src", "disk_image_sha", "name", "format", "added_at"} <= cols
-
-
-def test_insert_catalog_row_writes_all_10_columns(tmp_path: Path) -> None:
-    """Pins the column mapping of ``_db.insert_catalog_row``. The
-    5 callers (JSON oras + JSON https + UI form oras + UI form https
-    + bulk import) all funnel through this helper so a positional-
-    order drift in the SQL / tuple can't reappear."""
-    state = tmp_path / "state.db"
-    _db.init_db(state)
-    with sqlite3.connect(state) as conn:
-        conn.row_factory = sqlite3.Row
-        _db.insert_catalog_row(
-            conn,
-            bty_image_ref="ref-value",
-            src="https://origin.invalid/foo.img.gz",
-            resolved_src="https://origin.invalid/foo.img.gz",
-            disk_image_sha="sha-value",
-            name="foo.img.gz",
-            sha_url="https://origin.invalid/foo.img.gz.sha256",
-            format="img.gz",
-            size_bytes=42,
-            description="test description",
-            added_at="2026-07-04T12:00:00+00:00",
-        )
-        conn.commit()
-        row = conn.execute("SELECT * FROM catalog_entries").fetchone()
-    assert row["bty_image_ref"] == "ref-value"
-    assert row["src"] == "https://origin.invalid/foo.img.gz"
-    assert row["resolved_src"] == "https://origin.invalid/foo.img.gz"
-    assert row["disk_image_sha"] == "sha-value"
-    assert row["name"] == "foo.img.gz"
-    assert row["sha_url"] == "https://origin.invalid/foo.img.gz.sha256"
-    assert row["format"] == "img.gz"
-    assert row["size_bytes"] == 42
-    assert row["description"] == "test description"
-    assert row["added_at"] == "2026-07-04T12:00:00+00:00"
-
-
-def test_insert_catalog_row_raises_integrity_on_duplicate_src(tmp_path: Path) -> None:
-    """The ``UNIQUE(src)`` constraint is what the 5 callers detect at
-    the try/except sqlite3.IntegrityError boundary to surface their
-    per-site "already exists" flow (303-with-?error= in the UI, HTTP
-    409 in the JSON API, silent skipped-counter in the bulk import).
-    The helper does NOT catch the error; caller stays in charge of
-    the recovery shape."""
-    state = tmp_path / "state.db"
-    _db.init_db(state)
-    with sqlite3.connect(state) as conn:
-        _db.insert_catalog_row(
-            conn,
-            bty_image_ref="ref-a",
-            src="https://origin.invalid/dup.img.gz",
-            resolved_src=None,
-            disk_image_sha=None,
-            name="dup.img.gz",
-            sha_url=None,
-            format="img.gz",
-            size_bytes=None,
-            description=None,
-            added_at="2026-07-04T12:00:00+00:00",
-        )
-        conn.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            _db.insert_catalog_row(
-                conn,
-                bty_image_ref="ref-b",  # different ref, same src
-                src="https://origin.invalid/dup.img.gz",
-                resolved_src=None,
-                disk_image_sha=None,
-                name="dup2.img.gz",
-                sha_url=None,
-                format="img.gz",
-                size_bytes=None,
-                description=None,
-                added_at="2026-07-04T12:00:01+00:00",
-            )
 
 
 def test_init_db_creates_events_table(tmp_path: Path) -> None:

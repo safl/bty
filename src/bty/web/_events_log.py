@@ -102,8 +102,6 @@ KNOWN_EVENT_KINDS: tuple[str, ...] = (
     "pxe.client.orphan",
     "catalog.entry.added",
     "catalog.entry.add.failed",
-    "catalog.entry.deleted",
-    "catalog.entries.imported",
     "netboot.artifacts.fetched",
     "netboot.artifacts.fetch.requested",
     "netboot.artifacts.fetch.started",
