@@ -293,16 +293,13 @@ def _read_sidecar_sha(image_path: Path) -> str | None:
 class ImageSource:
     """One way to obtain an image's bytes.
 
-    ``kind`` distinguishes between an on-disk file (``"local"``,
-    ``location`` is an absolute filesystem path) and a manifest
-    entry (``"manifest"``, ``location`` is the upstream HTTP URL).
-    A single :class:`UnifiedImage` may carry multiple sources --
-    the same SHA-256 could be present locally AND declared in the
-    catalog manifest, in which case both sources are listed and
-    flash code is free to pick whichever is nearest.
+    Post-v0.66.0 sources are always catalog entries fetched via
+    withcache; ``kind`` is always ``"manifest"`` and ``location``
+    carries the upstream HTTP(S) or ``oras://`` URL. The dual-kind
+    "local" variant went with the retired local dir-scan.
     """
 
-    kind: str  # "local" | "manifest"
+    kind: str  # "manifest"
     location: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -317,20 +314,17 @@ class UnifiedImage:
 
     ``ref`` is the **provenance ID** -- ``sha256(canonicalise_src(src))``,
     a deterministic 64-hex digest of the canonical form of the source URL.
-    Populated for every entry the merge produces (dir-scan files get
-    ``src="file://<rel-path>"``; catalog entries get their declared
-    ``src``). This is THE value machine bindings target -- a rolling
-    oras tag's ref stays stable across re-pushes, so binding to a tag
-    survives the next rebuild upstream. Always non-empty.
+    Populated for every catalog entry. This is THE value machine
+    bindings target -- a rolling oras tag's ref stays stable across
+    re-pushes, so binding to a tag survives the next rebuild upstream.
+    Always non-empty.
 
     ``sha256`` is the **observed content hash**. May be None for a
-    rolling manifest entry that has never been cached, a dir-scan
-    file lacking a ``.sha256`` sidecar, or an operator-added URL
-    without a ``sha_url``. Back-fills on first cache / hash. Distinct
-    from ``ref`` -- the same content can land under
-    multiple refs (e.g. operator catalogs the same image under
-    ``oras://a`` and ``http://b``), and the same ref can map to
-    different content over time (rolling tag re-push).
+    rolling manifest entry that has never been pinned. Distinct from
+    ``ref`` -- the same content can land under multiple refs (e.g.
+    operator catalogs the same image under ``oras://a`` and
+    ``http://b``), and the same ref can map to different content
+    over time (rolling tag re-push).
 
     ``names`` collects every label the image goes by; ``sources``
     every fetch path. bty-web's ``_list_unified_images`` builds
