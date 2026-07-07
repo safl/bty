@@ -270,16 +270,12 @@ class ImageEntry(BaseModel):
     does not need to know about catalog manifests, sidecars, or
     cache layout: it just flashes from ``url``.
 
-    Resolution rule:
-
-    * Dir-scan file with ``.sha256`` sidecar (or auto-imported)
-      -> ``url`` points at the bty-web server (``/images/<sha>``);
-      the server serves the bytes.
-    bty-web does not host image bytes. Every entry's
-    ``url`` is either the upstream origin URL (https:// or
-    oras://) or a withcache ``/b/<token>/`` URL when the plan
-    endpoint resolves the entry's bytes to a warm cache. The
-    live env flashes from ``url`` directly.
+    Since v0.66.0 bty-web does not host image bytes and does not
+    scan a local image dir. Every entry's ``url`` is either the
+    upstream origin URL (https:// or oras://) or a withcache
+    ``/b/<token>/`` URL when the plan endpoint routes through the
+    configured withcache. The live env flashes from ``url``
+    directly.
 
     ``sha_short`` is a 12-char prefix of the entry's content sha
     (``disk_image_sha``) for display only -- used by the browser
