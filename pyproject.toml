@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.69.0"
+version = "0.70.0"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,20 +21,20 @@ dependencies = [
     # source of truth for the image catalog. bty consumes the catalog
     # through ``withcache.client.list_catalog`` / ``add_catalog_entry``
     # and calls ``withcache.oras`` directly for catalog-add-time digest
-    # resolution. Floor pinned at 0.11.0 -- since that release
-    # ``GET /catalog`` returns only downloaded entries (presence in
-    # the JSON IS the readiness signal), which the v0.68.0 bind
-    # gate + flash-plan renderer both depend on. Ceiling below 0.12
-    # so a major bump can't slip in.
-    "withcache>=0.11.0,<0.12",
+    # resolution. Floor pinned at 0.12.0 -- the UI consolidation there
+    # retired /ui/cached + /ui/downloads (folded into Catalog), moved
+    # the source URL editor onto Settings, and simplified Add HTTPS
+    # to URL-only. Ceiling below 0.13 so a major bump can't slip in.
+    "withcache>=0.12.0,<0.13",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
     # bty validates readiness via ``nbdmux.client.list_exports`` at
     # PXE chain time and at machine-binding time. Floor pinned at
-    # 0.5.0 -- since that release nbdmux relies on withcache 0.11's
-    # already-filtered catalog envelope. Ceiling below 0.6 so a
-    # major bump surfaces on floor lift.
-    "nbdmux>=0.5.0,<0.6",
+    # 0.6.0 -- since that release nbdmux ships a Dashboard + a
+    # separate NBDMUX_WITHCACHE_BROWSER_URL for operator cross-links
+    # to the withcache UI. Ceiling below 0.7 so a major bump surfaces
+    # on floor lift.
+    "nbdmux>=0.6.0,<0.7",
 ]
 
 [project.optional-dependencies]

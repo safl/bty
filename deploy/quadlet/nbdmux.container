@@ -19,6 +19,9 @@ Volume=nbdmux-data:/data
 Environment=NBDMUX_ADMIN_PASSWORD=bty-lab
 # Point nbdmux at withcache so the warm pipeline can fetch image bytes.
 Environment=NBDMUX_WITHCACHE_URL=http://withcache:8081
+# URL nbdmux embeds in operator-facing cross-links to the withcache UI.
+# Points at localhost's published port so the link is browser-reachable.
+Environment=NBDMUX_WITHCACHE_BROWSER_URL=http://localhost:8081
 
 [Service]
 Restart=always

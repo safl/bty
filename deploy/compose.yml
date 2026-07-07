@@ -63,6 +63,10 @@ services:
       # withcache; pointing at the in-stack sidecar means ramboot
       # warm POSTs benefit from the same LAN cache as the flash path.
       NBDMUX_WITHCACHE_URL: http://withcache:8081
+      # Nbdmux embeds this URL in operator-facing cross-links to the
+      # withcache UI. Points at the host-published port so the link
+      # resolves from the operator's browser.
+      NBDMUX_WITHCACHE_BROWSER_URL: ${BTY_WITHCACHE_BROWSER_URL:-http://localhost:8081}
     volumes:
       - ${BTY_HOST_DATA_DIR:-./data}/nbdmux:/data
       - ${BTY_HOST_DATA_DIR:-./data}/nbdmux/images:/images

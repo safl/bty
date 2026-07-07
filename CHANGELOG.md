@@ -9,6 +9,29 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.70.0] - 2026-07-07
+
+### Changed
+
+Trio floors lifted. Requires `withcache >= 0.12` and
+`nbdmux >= 0.6`. Both landed a UI consolidation pass:
+
+- withcache: retired `/ui/cached` + `/ui/downloads` (cache hits +
+  per-fetch progress fold into the Catalog entries table); new
+  `/ui/dashboard` landing page; source URL editor moved off
+  Catalog onto Settings; Add HTTPS entry form takes just a URL
+  (name from basename, format from suffix). Nav collapses to
+  brand-pill (Dashboard) + Catalog + Misses + Settings. Catalog
+  + Misses tables get bty-style sortable headers + filter +
+  per-page selector.
+- nbdmux: new `/ui/dashboard` landing page (brand-pill target).
+  New `NBDMUX_WITHCACHE_BROWSER_URL` config option (operator-facing
+  URL for cross-links to the withcache UI, distinct from the
+  container-internal API URL). Falls back to `NBDMUX_WITHCACHE_URL`
+  when unset. Bty's compose + Quadlet + `bty-lab init` templates
+  set it to the host-published address so the Exports empty-state
+  link is browser-reachable by default.
+
 ## [0.69.0] - 2026-07-06
 
 ### Removed
