@@ -160,7 +160,7 @@ What a bundle carries, and what it deliberately leaves behind:
 | Machine `mac` | **Boot mode** (every machine imports as `bty-inventory`) |
 | `lshw` hardware tree (CPU / RAM / NICs) | Image binding + `target_disk_serial` + `sanboot_drive` + `labels` |
 | `known_disks` (lsblk inventory + serials) | The `saw_flasher_boot` state bit + `last_flashed_at` |
-|  | The image catalog (`catalog_entries`) - re-import on the new host |
+|  | The image catalog (owned by withcache since v0.66.0) - configure withcache on the new host with its own catalog persistence |
 |  | The netboot artifacts (re-fetch to match the new version) |
 |  | Server settings + the audit log |
 
@@ -227,10 +227,11 @@ sudo bty-web import /var/lib/bty/backups/pre-$(date +%Y%m%d)
 The slim bundle carries a minimal per-machine record
 (`mac` + `hw_lshw` + `known_disks`) and nothing else: bindings
 (`boot_mode`, `bty_image_ref`, `target_disk_serial`, `sanboot_drive`,
-`labels`) reset on import and the operator re-binds; the image catalog
-(`catalog_entries`) does **not** travel either -- re-import the catalog
-on the new appliance via the Settings page's "Fetch latest catalog"
-button (or upload a `catalog.toml` directly). See "Backup".
+`labels`) reset on import and the operator re-binds. The image
+catalog is owned by withcache (since v0.66.0) and does not travel
+in the bty backup either; back up withcache's state dir separately,
+or re-populate its catalog on the new host by re-adding entries in
+the withcache UI. See "Backup".
 
 ### Recovering an old `.bak`
 

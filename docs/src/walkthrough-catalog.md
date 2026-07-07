@@ -1,16 +1,18 @@
 # Walkthrough: image catalog
 
-The image catalog is bty-web's only source of truth for "what can the
-fleet flash". Each entry is a URL (`oras://` or `https://`) plus
-optional metadata: a `sha256` (when published alongside the image), a
-human display name, a format, a size hint, a one-line description.
+The image catalog is what tells the fleet "what can I flash". Each
+entry is a URL (`oras://` or `https://`) plus optional metadata: a
+`sha256` (when published alongside the image), a human display
+name, a format, a size hint, a one-line description.
 
-v0.40+: bty-web doesn't own image bytes. The live env fetches the
-catalog entry's URL at flash time -- through
-[withcache](https://github.com/safl/withcache) when the cache is warm,
-direct from the upstream origin when it isn't. There is no
-`BTY_IMAGE_ROOT`, no dir-scan, no on-disk cache under bty-web's state
-dir. One rule: bty has catalogs; withcache has bytes.
+Since v0.66.0 bty-web does **not** own the catalog. Withcache does.
+Bty-web reads it from `<withcache>/catalog` (JSON envelope) through
+the in-process `WithcacheCatalog` snapshot and refreshes it on
+demand. Operators add + download entries on the withcache UI; bty
+sees only entries whose bytes are already cached (withcache 0.11+
+filters `GET /catalog` to downloaded rows). Bty owns machine
+bindings (which MAC gets which catalog entry) and the flash / boot
+plan; withcache owns the bytes.
 
 ## Catalog identity: `ref` vs `sha256`
 
@@ -44,30 +46,27 @@ same canonical src are one row. Same content under multiple refs
 `https://b`) renders as two rows -- different provenance, even if
 the bytes match.
 
-## Three ways to add an entry
+## Adding entries (on withcache)
 
-All paths write rows to the `catalog_entries` table in `state.db`.
-None of them puts bytes anywhere on bty-web's filesystem.
+Since v0.66.0 the catalog lives on withcache; bty-web has no add /
+upload / fetch forms of its own. Open the withcache UI (per your
+deploy, typically `http://<host>:8081/ui/catalog`) and use the
+subnav's three inline actions:
 
-1. **Upload a `catalog.toml`** -- `POST /ui/catalog/upload`. Use this
-   when you have a curated multi-entry manifest. bty-web parses the
-   TOML, imports every row, then replaces `BTY_PATHS_CATALOG_FILE` so the
-   manifest survives restarts.
+1. **Add ORAS** — paste an `oras://ghcr.io/owner/repo:tag`
+   reference. Withcache resolves the manifest and prefills format /
+   size / arch from the layer annotations.
+2. **Add HTTPS** — paste a plain `https://` URL. Withcache derives
+   the entry name from the URL basename and infers the format from
+   the file suffix. sha256 + size land when Download completes.
+3. **Fetch default** — re-parse the currently-configured catalog
+   source (Settings > Catalog source) and merge its entries in.
 
-2. **Fetch from release** -- `POST /ui/catalog/fetch-release`. Pulls
-   `releases/latest/download/catalog.toml` from the configured
-   upstream catalog repo (default `safl/nosi`; override via
-   `/ui/settings/upstream` > "Catalog repo") and imports it. This is
-   the "load the default nosi catalog" button.
+Then click Download on each row you want bty to see. The
+trio-facing `GET /catalog` API filters to downloaded rows only;
+bty's next `WithcacheCatalog.refresh()` pulls them in.
 
-3. **Add by URL** -- `POST /catalog/entries`. Body:
-   `{"image_url": "...", "sha_url": "..." | null}`. For an ad-hoc
-   image not in a curated catalog: host it on whatever HTTP server
-   you have (nginx / GHCR via oras / S3) and add the URL. If the
-   upstream publishes a `.sha256` sidecar, point `sha_url` at it;
-   bty-web fetches + parses + stores the digest.
-
-There is **no upload form for image bytes**.
+There is **no upload form for image bytes** on either side.
 
 ## Manifest schema
 
@@ -94,20 +93,14 @@ Validate before deploying:
 python3 -c 'import sys; from bty import catalog; catalog.load_source(sys.argv[1])' /path/to/catalog.toml
 ```
 
-bty-web also parses server-side: an upload with a parse error bounces
-back with the error message and does NOT replace the running
-manifest.
-
 ## Browser UI
 
-`/ui/images` renders the catalog as a flat table: name, content sha
-(or "unset"), format, source (with an icon for oras vs https), and a
-per-row entry-delete button. Header controls: **Fetch latest catalog**
-+ **Upload catalog**. In-page sub-nav jumps to the **List** + the
-recent **Activity** card.
-
-There is no Fetch / Hash / Cache-delete column. Those buttons were
-the DownloadManager + HashManager affordances; v0.40 took them out.
+Catalog inspection + mutation moved to withcache in v0.66.0.
+Bty-web's `/ui/machines/{mac}` image picker lists the current
+snapshot (backed by `WithcacheCatalog`). To add or delete
+entries, open the withcache UI at `<BTY_WITHCACHE_URL>/ui/catalog`
+and use its Add ORAS / Add HTTPS / Delete controls. Bty picks up
+the new state on the next `WithcacheCatalog.refresh()`.
 
 ## CLI
 
@@ -130,43 +123,37 @@ the deleted bty-web image-store.
 
 ## HTTP API (catalog surface)
 
+Since v0.66.0 bty-web has no add / delete / import routes for
+catalog entries. All catalog mutation lives on withcache. Bty-web
+serves the read side needed by the live env + operator UI:
+
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/images` | GET | unified catalog listing (one row per `catalog_entries` row) |
-| `/catalog.toml` | GET | the unified catalog as a TOML manifest (what `bty --catalog` consumes) |
-| `/catalog/entries` | GET | list operator-curated catalog entries |
-| `/catalog/entries` | POST | add an entry: `{"image_url": "...", "sha_url": "..." \| null}` |
-| `/catalog/entries?src=URL` | DELETE | delete an entry by its `src` URL |
-| `/catalog/import` | POST | import entries from a `source=` catalog (path / URL / oras) |
-| `/ui/catalog/upload` | POST | (form) upload a `catalog.toml` multipart |
-| `/ui/catalog/fetch-release` | POST | (form) pull the default catalog from the configured upstream repo (Settings > Upstream > Catalog repo; default `safl/nosi`) |
+| `/images` | GET | unified listing of bindable images (backed by `WithcacheCatalog.entries`, filtered to downloaded rows) |
+| `POST /admin/withcache/refresh` | POST | force `WithcacheCatalog.refresh()` -- pulls the current withcache `/catalog` again |
 
 All endpoints are auth-gated (the same session cookie as the
-browser UI).
+browser UI). Add + Download + Delete happen on the withcache UI;
+open Settings > Upstream to see the current URL bty-web reads from.
 
-The byte-handling endpoints (`/catalog/downloads`, `/catalog/hashes`,
-`/catalog/cache/{name}`, `PUT /images/{name}`) are gone in v0.40.
-Image bytes are withcache's domain; the live env flashes from
-whatever URL the plan endpoint hands it.
+## Where things live
+
+| File / dir | Owner | Purpose |
+|---|---|---|
+| withcache's `state.db:blobs` + `blobs/` dir | withcache | cached image bytes, keyed by origin URL |
+| withcache's `state.db:events` | withcache | audit trail for catalog / download activity |
+| bty-web's `state.db:machines` | bty | MAC bindings + boot mode + last-seen state |
+| bty-web's `state.db:events` | bty | audit trail for machine / netboot / settings activity |
+| upstream origin | publisher | canonical source when withcache is cold |
+
+Bty-web stores no image bytes; withcache holds them. See
+[walkthrough-image-store.md](walkthrough-image-store.md) for the
+full picture.
 
 ## Environment variables
 
 | Var | Default | Purpose |
 |---|---|---|
-| `BTY_PATHS_STATE_DIR` | `/var/lib/bty` | state directory (state.db, catalogs, session-secret) |
-| `BTY_PATHS_CATALOG_FILE` | `${BTY_PATHS_STATE_DIR}/catalog.toml` | catalog manifest path |
-| `BTY_BOOT_RELEASE_REPO` | `safl/bty` | GitHub repo the "Fetch netboot artifacts" button pulls kernel/initrd/squashfs from (was previously the catalog source too; the catalog source moved to a separate setting in v0.46 -- ``/ui/settings/upstream`` > "Catalog repo", default ``safl/nosi``). |
-
-## Where the bytes actually live
-
-| File / dir | Owner | Purpose |
-|---|---|---|
-| `state.db:catalog_entries` | bty-web | the catalog (rows) |
-| `${BTY_PATHS_STATE_DIR}/catalog.toml` | bty-web | the operator-uploaded manifest (re-importable) |
-| withcache's data dir | withcache | cached image blobs, keyed by origin URL |
-| upstream origin | publisher | the source of truth when withcache is cold |
-
-bty-web stores no image bytes; withcache holds the cache; the
-upstream origin is the canonical source. See
-[walkthrough-image-store.md](walkthrough-image-store.md) for the
-full picture.
+| `BTY_PATHS_STATE_DIR` | `/var/lib/bty` | state directory (state.db, session-secret) |
+| `BTY_WITHCACHE_URL` | (unset) | withcache HTTP endpoint the `WithcacheCatalog` reads from |
+| `BTY_BOOT_RELEASE_REPO` | `safl/bty` | GitHub repo the "Fetch netboot artifacts" button pulls kernel/initrd/squashfs from |

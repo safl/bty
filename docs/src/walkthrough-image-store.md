@@ -27,11 +27,13 @@ at a URL; the live env streams from that URL when it flashes.
 
 bty-web's plan endpoint returns one of two URLs to the live env:
 
-1. **withcache warm** -- the `/b/<urlsafe-b64(origin)>/<basename>`
-   serve URL. The HEAD bty-web does before returning the URL warms
-   withcache's auto-fetch path on a miss; subsequent boots flip to
-   cached.
-2. **withcache cold or unconfigured** -- the origin URL itself.
+1. **withcache configured** -- the `/b/<urlsafe-b64(origin)>/<basename>`
+   serve URL. Since v0.60.0 bty-web does not probe / warm; withcache
+   is operator-populated (0.10.0+ dropped the auto-fetch path) so the
+   bytes are there iff the operator hit Download on the withcache UI
+   for that catalog entry. Since v0.66.0 bty-web only sees entries
+   whose bytes are already downloaded, so the URL always resolves.
+2. **withcache unconfigured** -- the origin URL itself.
    bty-web is out of the bytes path; the live env streams direct.
 
 For `oras://` catalog entries the plan ships either the withcache

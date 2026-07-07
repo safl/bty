@@ -360,9 +360,10 @@ Conditional:
   bound, the ref resolves, but `target_disk_serial` is empty. Distinct kind
   so the operator can filter for "why isn't this reflashing?" cases.
 - `netboot.pxe.flash.orphan_ref` fires when `boot_mode=bty-flash-always`
-  is set and an image is bound but the ref has no resolvable
-  `catalog_entries` row. Different failure mode from `no_target_disk`; the
-  binding itself is stale.
+  is set and an image is bound but the ref has no matching row in the
+  withcache catalog snapshot. Different failure mode from
+  `no_target_disk`; the binding itself is stale (the catalog entry was
+  deleted on withcache, or the ref was never valid).
 
 ## Audit log: event kinds by trigger
 
@@ -377,10 +378,7 @@ Conditional:
 | `netboot.pxe.offered`                   | Every `GET /pxe/{mac}` hit. `details.offer` records what was returned (`ipxe-exit` / `bty-inventory` / `bty-tui` / `unknown` / one of the flash offers) and `details.offer_kind` carries the specific offer_kind string (e.g. `bty-flash-once-ipxe-exit`, `bty-inventory-ipxe-exit`, `exit-fallback`, `unknown`). `details.reason` annotates refusals (`no_target_disk` / `orphan_ref`). |
 | `netboot.pxe.plan`                      | `GET /pxe/{mac}/plan` resolved a flash plan (image / target disk / boot args) for an auto-flash request.   |
 | `netboot.flasher.armed`                 | First `/boot/<artifact>?mac=` fetch in a cycle armed `saw_flasher_boot=1` (the live env booted). Idempotent; only the 0->1 transition lands a row. |
-| `catalog.entry.added`           | Operator `POST /catalog/entries` (form or JSON) succeeds.                                                  |
-| `catalog.entry.add.failed`      | sha resolve / oras resolve / duplicate-src on `POST /catalog/entries`.                                     |
-| `catalog.entry.deleted`         | Operator `DELETE /catalog/entries`.                                                                         |
-| `catalog.entries.imported`      | `POST /catalog/import` or the form-style `/ui/catalog/upload` / `/ui/catalog/fetch-release` ingested a catalog.toml. |
+| (catalog kinds retired on bty in v0.66.0) | Catalog mutation moved to withcache; the sibling emits its own `catalog.entry.*` audit events on `<BTY_WITHCACHE_URL>/ui/events`. |
 | `netboot.artifacts.fetch.requested` / `.started` / `.cancelled` / `.failed` / `netboot.artifacts.fetched` | Lifecycle events for the release-artifact fetch worker (`POST /workers/releases` or `POST /boot/releases`); terminal success kind is bare `netboot.artifacts.fetched`. |
 | `settings.upstream.updated`     | Operator `POST /ui/settings/upstream` saved the release-repo / catalog-URL / release-tag overrides.        |
 | `settings.backup.updated`       | Operator `POST /ui/settings/backup` saved the scheduled-backup knobs (enabled / cadence / retention).      |
@@ -404,10 +402,8 @@ requesting `source_ip`, the `actor` (`operator` / `pxe-client` /
 | Log out                                   | `POST /ui/logout`                    | Clears session cookie. Records `auth.logout`.                                                       |
 | Bind image + disk + policy on a machine   | `POST /ui/machines/{mac}`            | UPSERT. Refuses `boot_mode=bty-flash-always` without `target_disk_serial`. Records `machine.{created,upserted}`. |
 | Delete a machine record                   | `POST /ui/machines/{mac}/delete`     | DELETE row. Records `machine.deleted`.                                                              |
-| Add catalog entry by URL                  | `POST /ui/catalog/entries`           | sha-resolve (if `sha_url` given) -> INSERT `catalog_entries`. Records `catalog.entry.{added,add.failed}`. |
-| Delete a catalog entry                    | `DELETE /catalog/entries?src=...`    | Removes the row. v0.40+: no on-disk cached bytes to clean up; withcache evicts on its own schedule. Records `catalog.entry.deleted`. |
-| Upload a `catalog.toml` manifest          | `POST /ui/catalog/upload`            | Validates + atomic-renames into `${BTY_PATHS_STATE_DIR}/catalog.toml`.                                     |
-| Fetch `catalog.toml` from the configured URL | `POST /ui/catalog/fetch-release` | GETs the operator's `[upstream] catalog_url` (defaults to a pinned nosi release), same persist as upload.                              |
+| Add + Download catalog entries            | (withcache UI)                       | Since v0.66.0 all catalog mutation lives on withcache. Bty-web reads the withcache-owned catalog via `WithcacheCatalog`; entries appear once withcache has downloaded their bytes. Withcache emits its own audit events on `catalog.entry.*` kinds. |
+| Refresh bty-web's catalog snapshot        | `POST /admin/withcache/refresh`      | Force `WithcacheCatalog.refresh()`; re-fetches `<BTY_WITHCACHE_URL>/catalog` and repopulates the in-memory snapshot. |
 | Fetch boot artifacts (kernel + initrd + squashfs) | `POST /ui/netboot/fetch-release` | Pulls release artifacts into `BTY_PATHS_BOOT_DIR`. Lifecycle events `netboot.artifacts.{requested,started,fetched,failed,cancelled}`.        |
 | Save upstream sources (netboot repo / tag, catalog URL) | `POST /ui/settings/upstream` | Persists overrides into `state.db` (settings table); fetch routes resolve from this at request time. Records `settings.upstream.updated`. |
 | Save scheduled-backup knobs (enabled / cadence / retention) | `POST /ui/settings/backup` | Same persistence; scheduler picks up changes on the next 60s tick. Records `settings.backup.updated`. |
@@ -422,10 +418,7 @@ Where bty-web refuses what the operator asked, and what the operator sees:
 | Refuse flash chain without `target_disk_serial`        | `boot_mode=bty-flash-always`/`bty-flash-once`, image bound, target empty.        | `GET /pxe/{mac}`                        | `netboot.pxe.flash.no_target_disk` event; ipxe.j2 (exit to firmware). |
 | Refuse `boot_mode=bty-flash-always` upsert without target       | Form posts `boot_mode=bty-flash-always` and `target_disk_serial=""`.         | `POST /ui/machines/{mac}`               | 303 to `/ui/machines/{mac}?error=...` flash banner. |
 | Refuse flash on serial mismatch at boot time           | Live env can't find a current disk whose serial matches the plan's `target_disk_serial`. | `bty` auto-flash on tty1 (live env)     | `bty` prints a red "No matching disk" Panel + non-zero exit; bty-on-tty1.service stays at the failed banner. |
-| Refuse oversize catalog upload                         | `/ui/catalog/upload` body > 1 MiB.                                  | `POST /ui/catalog/upload`               | 303 with `?error=...exceeded...`.                  |
 | Refuse oversize boot artifact upload                   | `PUT /boot/{name}` body > `BTY_TUNING_MAX_UPLOAD_BYTES` (200 GiB). | `PUT /boot/{name}`                      | 413 Content Too Large.                              |
-| Refuse non-TOML catalog upload                         | Filename extension not `.toml`/`.tml` OR TOML parse fails.          | `POST /ui/catalog/upload`               | 303 with `?error=...` flash. On-disk manifest preserved on parse failure. |
-| Refuse non-2xx catalog fetch-release body             | HTTPError 404, URLError, TimeoutError, or non-TOML body.            | `POST /ui/catalog/fetch-release`        | 303 with `?error=...`.                              |
 | Refuse mismatched login                                | Submitted password does not match `$BTY_ADMIN_PASSWORD`.            | `POST /ui/login`                        | Login form re-rendered with `Invalid password`.    |
 | Refuse unknown `boot_mode`                           | Pydantic pattern check on `BOOT_POLICIES`.                          | `PUT /machines/{mac}` + form sibling   | 422 (JSON) / 303 with flash (form).                |
 | Refuse path-traversal in upload `{name}`               | `..%2F` or `..` segments in `PUT /boot/{name}`.                     | `_safe_path` boundary check         | 400 / 404 / 405 depending on the request shape.     |
