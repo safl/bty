@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.70.0"
+version = "0.71.0"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,20 +21,20 @@ dependencies = [
     # source of truth for the image catalog. bty consumes the catalog
     # through ``withcache.client.list_catalog`` / ``add_catalog_entry``
     # and calls ``withcache.oras`` directly for catalog-add-time digest
-    # resolution. Floor pinned at 0.12.0 -- the UI consolidation there
-    # retired /ui/cached + /ui/downloads (folded into Catalog), moved
-    # the source URL editor onto Settings, and simplified Add HTTPS
-    # to URL-only. Ceiling below 0.13 so a major bump can't slip in.
-    "withcache>=0.12.0,<0.13",
+    # resolution. Floor pinned at 0.13.0 -- the events log landed
+    # there (audit trail on catalog / download / miss / settings +
+    # /ui/events + Health tripwire for unacknowledged failures).
+    # Ceiling below 0.14 so a major bump can't slip in.
+    "withcache>=0.13.0,<0.14",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
     # bty validates readiness via ``nbdmux.client.list_exports`` at
     # PXE chain time and at machine-binding time. Floor pinned at
-    # 0.6.0 -- since that release nbdmux ships a Dashboard + a
-    # separate NBDMUX_WITHCACHE_BROWSER_URL for operator cross-links
-    # to the withcache UI. Ceiling below 0.7 so a major bump surfaces
-    # on floor lift.
-    "nbdmux>=0.6.0,<0.7",
+    # 0.7.0 -- since that release nbdmux ships the events log
+    # matching withcache's shape (audit trail on export lifecycle
+    # + /ui/events). Ceiling below 0.8 so a major bump surfaces on
+    # floor lift.
+    "nbdmux>=0.7.0,<0.8",
 ]
 
 [project.optional-dependencies]

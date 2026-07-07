@@ -9,6 +9,22 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.71.0] - 2026-07-08
+
+### Changed
+
+Trio floors lifted. Requires `withcache >= 0.13` and
+`nbdmux >= 0.7`. Both landed a slim events audit-log system: a
+new append-only `events` table in each service's `state.db`
+captures operator + system actions (catalog entries added /
+deleted / downloaded, downloads started / completed / failed,
+misses recorded, exports created / deleted, warm lifecycle
+transitions, settings changes, auth events). Each service ships a
+new `/ui/events` page with a free-text filter and per-page
+pagination; the dashboards replace their previous "recent items"
+card with a "Last N events" card and flag unacknowledged failures
+via a Health tripwire.
+
 ## [0.70.0] - 2026-07-07
 
 ### Changed
