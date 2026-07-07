@@ -2051,11 +2051,11 @@ def create_app(
         """Build the unified image listing from withcache's catalog.
 
         Since v0.66.0 bty consumes withcache's catalog directly (see
-        :mod:`bty.web._withcache_catalog`); ``catalog_entries`` no
-        longer exists. Each entry produces one
-        :class:`UnifiedImage`. ``cached`` is always False -- bty-web
-        doesn't track withcache's contents here; the live env / wizard
-        flashes whichever URL the plan or catalog hands it.
+        :mod:`bty.web._withcache_catalog`); the local
+        ``catalog_entries`` table was retired. Each withcache entry
+        produces one :class:`UnifiedImage`. Since withcache 0.11.0
+        every entry the snapshot sees is downloaded, so the live
+        env's flash always resolves via withcache when configured.
         """
         out: list[images.UnifiedImage] = []
         for entry in app.state.withcache_catalog.entries:
