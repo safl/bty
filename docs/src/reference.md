@@ -258,14 +258,17 @@ Protected routes (session cookie required):
 | GET | `/machines/{mac}/disks.json` | - | lsblk-derived disk inventory JSON (404 if none posted) |
 | PUT | `/machines/{mac}` | `MachineUpsert` | `Machine` (the new state) |
 | DELETE | `/machines/{mac}` | - | 204 (404 if missing) |
-| POST | `/catalog/entries` | `CatalogEntryAdd` | new entry (201) |
-| GET | `/catalog/entries` | - | array of catalog rows |
-| DELETE | `/catalog/entries?src=URL` | - | 204 (404 if missing) |
-| POST | `/catalog/import?source=...` | - | `{imported, skipped, errors}` |
-| POST | `/ui/catalog/upload` | (multipart `file`) | 303 -> `/ui/images` |
-| POST | `/ui/catalog/fetch-release` | - | 303 -> `/ui/images` (pulls default catalog) |
+| POST | `/admin/withcache/refresh` | - | 303 -> `/ui/machines` (forces `WithcacheCatalog.refresh()`) |
+| GET | `/images` | - | array of bindable images (backed by `WithcacheCatalog`, filtered to downloaded rows) |
 | GET / POST / DELETE | `/workers/backups` | (BackupManager) | trigger / list / cancel backups |
 | GET / POST / DELETE | `/boot/releases` | (ReleaseFetchManager) | trigger / list / cancel netboot-artifact pulls |
+
+Since v0.66.0 all catalog mutation lives on withcache. Bty-web
+reads via `WithcacheCatalog` (an in-process snapshot backed by
+`GET <BTY_WITHCACHE_URL>/catalog`). Add / Download / Delete on
+the withcache UI; bty picks up the new state on the next
+`WithcacheCatalog.refresh()` (auto on start + on-demand via
+`/admin/withcache/refresh`).
 
 ### Schema mismatch on upgrade (v0.33.0+)
 
@@ -281,13 +284,6 @@ tripwire; acknowledge from `/ui/events`. The `.bak` file is a
 normal sqlite DB an operator can open with `sqlite3` to recover
 specific rows. See operations.md for the full upgrade flow.
 
-``POST /catalog/import`` parses the TOML at ``source`` (path,
-``http(s)://``, or ``oras://``) via ``bty.catalog.load_source`` and adds
-each entry to the catalog as metadata. **No bytes are fetched at import
-time** -- v0.40+ bty-web has no image-store; the live env streams
-each entry's URL directly (via withcache when warm) at flash time.
-Idempotent: re-importing the same source skips duplicates by ``src``.
-
 MAC addresses are accepted in any case + `:`-or-`-` separated, and
 normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 
@@ -297,8 +293,8 @@ normalised to lower-case `aa:bb:cc:dd:ee:ff`.
 Machine = {
   "mac": "aa:bb:cc:dd:ee:ff",
   "bty_image_ref": "<64-hex>" | null,        # null = discovered but unassigned
-                                             # references catalog_entries.bty_image_ref
-                                             # (sha256 of canonicalised src URL)
+                                             # matches a withcache catalog entry's
+                                             # ref (sha256 of canonicalised src URL)
   "labels": ["rack-3", "noisy", ...],        # free-form display tags; each
                                              # alnum-leading + alnum/space/-/_/.,
                                              # max 64 chars per tag, 16 per machine,
@@ -345,39 +341,17 @@ MachineUpsert = {
                                              # refuses without it
 }
 
-CatalogEntry (as returned by `GET /catalog/entries`) = {
-  "bty_image_ref":  "<64-hex>",                # PK; sha256(canonicalise_src(src))
-  "src":            "file://..." | "https://..." | "oras://...",
-  "disk_image_sha": "<64-hex>" | null,         # declared content sha;
-                                               # populated only when the
-                                               # publisher pinned it (TOML
-                                               # sha256, sha_url, or oras
-                                               # layer digest)
-  "name":           "<filename>",
-  "format":         "img.gz" | "img.zst" | ...,
-  "size_bytes":     int | null,
-  "sha_url":        "https://.../<name>.sha256" | null,
-  "description":    str | null,
-  "added_at":       "<ISO 8601>"
-}
-
-ImageEntry = {
+ImageEntry (as returned by `GET /images`) = {
   "name":       "debian.qcow2",
   "format":     "qcow2",
   "size_bytes": 268435456,
-  "url":        "http://server:8080/images/<disk_image_sha>/<name>"
-                                              | "https://..." | "oras://...",
-  "ref":        "<64-hex>",                    # bty_image_ref (=
-                                              # sha256(canonicalise_src(src)));
+  "url":        "https://..." | "oras://...",  # the src URL withcache
+                                              # holds bytes for
+  "ref":        "<64-hex>",                    # sha256(canonicalise_src(src));
                                               # the value to PUT as
                                               # MachineUpsert.bty_image_ref
-                                              # without recomputing the
-                                              # canonicalisation client-
-                                              # side
-  "sha_short":  "<12-hex>" | null,             # display-only prefix
-                                              # of disk_image_sha
-  "cached":     true | false                   # true iff bty-web has
-                                              # the bytes on disk
+  "sha_short":  "<12-hex>" | null              # display-only prefix
+                                              # of the disk-image sha
 }
 
 InventoryDisk = {
@@ -442,17 +416,10 @@ Bootstrap CSS, HTMX form posts).
 - `GET /ui/machines/{mac}` -> detail + edit form
 - `POST /ui/machines/{mac}` -> upsert from a form submit
 - `POST /ui/machines/{mac}/delete` -> delete record
-- `GET /ui/images` -> image catalog page (the unified dir-scan +
- catalog-entry listing, with Fetch-latest-catalog / Upload-catalog
- controls in its header). The "Add image" card below the list
- carries the per-image "Add by URL" + local-upload widgets.
-- `POST /ui/catalog/entries` (form) and
- `POST /catalog/entries` (JSON) -> add an operator-curated
- catalog entry. ``image_url`` accepts http(s):// URLs and
- ``oras://`` references; for ``oras://`` the server resolves the
- OCI manifest at add time, uses the layer's content-addressed
- digest as the entry's sha256 (= machine-bindable), and skips
- the optional sha_url branch (manifest is authoritative).
+- (bty-web /ui/images retired in v0.66.0 -- catalog now lives on
+ withcache. Bindable entries surface on `/ui/machines/{mac}`'s
+ image picker; add + Download entries on the withcache UI at
+ `<BTY_WITHCACHE_URL>/ui/catalog`.)
 - `GET /ui/netboot` (Netboot) -> the netboot artifacts inventory
  (present/missing per artifact, sizes, last-fetched timestamps) +
  the Fetch artifacts trigger and active-fetch table (release trio +
@@ -477,13 +444,13 @@ Bootstrap CSS, HTMX form posts).
  `https://github.com/<BTY_BOOT_RELEASE_REPO>/releases/<tag>/download/`
  (default `safl/bty`, default tag `latest`); verifies the manifest
  and atomically installs into `BTY_PATHS_BOOT_DIR`.
-- `GET /ui/settings` -> the config page: the editable **Catalog** card
- (single `catalog_url` field) full-width on top, **Netboot release**
- (release repo + tag) and **Backup schedule** (enabled / cadence /
- retention) cards side-by-side, then read-only **Identity / Storage /
- Network** config groups (each row's source: env var / TOML / default,
- with an inline edit form when sourced from TOML), plus the
- **DHCP / Network boot** router cheatsheet. Operator authentication
+- `GET /ui/settings` -> the config page: the editable **Withcache
+ upstream** card (URL bty-web reads the catalog from) full-width on
+ top, **Netboot release** (release repo + tag) and **Backup schedule**
+ (enabled / cadence / retention) cards side-by-side, then read-only
+ **Identity / Storage / Network** config groups (each row's source:
+ env var / TOML / default, with an inline edit form when sourced from
+ TOML), plus the **DHCP / Network boot** router cheatsheet. Operator authentication
  is on the separate Account page (`/ui/account`, reached via the user
  pill): the credential is ``[admin] password`` in ``bty.toml`` (env
  override `BTY_ADMIN_PASSWORD`), rotated by changing the value and
@@ -491,8 +458,9 @@ Bootstrap CSS, HTMX form posts).
  cookie-signing secret with `rm /var/lib/bty/session-secret &&
  systemctl restart bty-web`.
 - `POST /ui/settings/upstream` -> persists the netboot repo / tag and
- the catalog URL into the `settings` table; fetch routes resolve from
- this at request time so the changes take effect without a restart.
+ the withcache URL into the `settings` table; fetch routes resolve
+ from this at request time so the changes take effect without a
+ restart.
 - `POST /ui/settings/backup` -> persists the scheduled-backup knobs
  (enabled / cadence / retention); the scheduler picks them up on the
  next 60s tick.

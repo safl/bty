@@ -244,8 +244,11 @@ or "everything that touched this MAC" jump is one click. The JSON
 ``before_id``, ``limit``) for scripting.
 
 **Recent-activity cards** on ``/ui/dashboard``, ``/ui/machines``
-(list + per-MAC detail), ``/ui/images``, ``/ui/netboot``, and
-``/ui/backups`` all embed the same ``_events_card.html`` partial filtered
-to the relevant subject, so each page has a short context-local timeline
+(list + per-MAC detail), ``/ui/netboot``, and ``/ui/backups`` all
+embed the same ``_events_card.html`` partial filtered to the
+relevant subject, so each page has a short context-local timeline
 without leaving for the full log. The global timeline lives at
-``/ui/events``.
+``/ui/events``. Catalog + download activity now lives in
+withcache's events log (`<BTY_WITHCACHE_URL>/ui/events`); bty
+surfaces the bindable-image list through the machine picker but
+does not embed a catalog-activity card.
