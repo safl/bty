@@ -98,13 +98,13 @@ def test_list_filters_by_kind(tmp_path: Path) -> None:
     conn, close = _open(state)
     try:
         _events_log.record(conn, kind="machine.discovered", summary="m1")
-        _events_log.record(conn, kind="catalog.entries.imported", summary="i1")
+        _events_log.record(conn, kind="netboot.artifacts.fetched", summary="a1")
         _events_log.record(conn, kind="machine.flashed", summary="m2")
         conn.commit()
-        rows = _events_log.list_events(conn, kind="catalog.entries.imported")
+        rows = _events_log.list_events(conn, kind="netboot.artifacts.fetched")
     finally:
         close()
-    assert [r.summary for r in rows] == ["i1"]
+    assert [r.summary for r in rows] == ["a1"]
 
 
 def test_list_filters_by_subject(tmp_path: Path) -> None:
