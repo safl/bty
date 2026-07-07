@@ -222,7 +222,7 @@ def register_ui_routes(
             f"{withcache_url.rstrip('/')}/ui/catalog" if withcache_url else "/ui/settings"
         )
         with _db.open_db(state_path) as conn:
-            # Live panel context (machine summary + image breakdown),
+            # Live panel context (machine summary + image count),
             # shared with the SSE publisher so the two never drift.
             counts = dashboard_counts_context(conn, unified)
             # Error-event count for the Health Monitoring panel: only
@@ -1841,12 +1841,11 @@ def dashboard_counts_context(conn: Any, unified: list[bty_images.UnifiedImage]) 
     the SSE ``render_dashboard_panels`` publisher (in _app) so the two
     panels can never drift.
 
-    ``unified`` is the merged catalog listing. The image breakdown
-    counts entries that carry each kind of source: ``local`` is a
-    file on disk, ``http`` an http(s):// source, ``oras`` an OCI
-    registry ref; ``cached`` is the content-addressed-cache hit flag.
-    An entry can count toward several (e.g. a local file that's also
-    a catalog http entry).
+    ``unified`` is the merged catalog listing (backed by the
+    withcache snapshot since v0.66.0). The dashboard shows only
+    the total count now; the per-source breakdown that lived here
+    was retired when the local dir-scan + on-disk cache flag went
+    away.
     """
     machine_count = conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0]
     unassigned_count = conn.execute(
