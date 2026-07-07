@@ -152,6 +152,12 @@ services:
       # this withcache; pointing at the in-stack sidecar means ramboot
       # warm POSTs benefit from the same LAN cache as the flash path.
       NBDMUX_WITHCACHE_URL: http://withcache:8081
+      # Nbdmux embeds this URL in operator-facing cross-links to the
+      # withcache UI (e.g. the Exports empty-state hint). Uses the
+      # deploy's advertised host so the link resolves from the
+      # operator's browser (the internal ``http://withcache:8081``
+      # above only resolves inside the podman network).
+      NBDMUX_WITHCACHE_BROWSER_URL: ${{BTY_WITHCACHE_BROWSER_URL:-http://localhost:8081}}
     volumes:
       - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux:/data
       - ${{BTY_HOST_DATA_DIR:-./data}}/nbdmux/images:/images
@@ -518,6 +524,10 @@ Environment=NBDMUX_ADMIN_PASSWORD={nbdmux_pw}
 # host-alias which resolves to the host's default gateway and
 # reaches the withcache Quadlet's PublishPort=8081.
 Environment=NBDMUX_WITHCACHE_URL=http://host.containers.internal:8081
+# Browser-reachable URL for withcache. Nbdmux embeds this in
+# operator-facing cross-links only; leave as-is on single-host
+# deploys where withcache's 8081 is exposed on localhost.
+Environment=NBDMUX_WITHCACHE_BROWSER_URL=http://localhost:8081
 
 [Service]
 Restart=always
