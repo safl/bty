@@ -3,25 +3,28 @@
 A single append-only ``events`` table in state.db captures the
 "who did what when" timeline that the operator wants visible in
 the UI: machines checking in, machines being flashed, image
-uploads, catalog adds / deletes, settings changes, auth attempts.
-Three rendering surfaces consume the same rows:
+uploads, settings changes, auth attempts. Two rendering surfaces
+consume the same rows:
 
 1. ``/ui/events`` -- top-level page with filter + pagination.
 2. ``/ui/machines/{mac}`` -- the most recent events touching this
    MAC, embedded in the machine-detail card.
-3. ``/ui/images`` -- the most recent events touching the image
-   catalog (catalog adds / deletes, manifest imports).
+
+Catalog activity is emitted by withcache's own audit log since
+v0.66.0; bty-web does not surface catalog events any more.
 
 Conventions:
 
 - ``kind`` is a dotted lowercase namespace, e.g.
   ``machine.discovered``, ``machine.flashed``,
-  ``catalog.refreshed``, ``netboot.artifacts.fetched``. Stable
-  strings; the UI keys badge colours off them.
+  ``netboot.artifacts.fetched``. Stable strings; the UI keys badge
+  colours off them. Catalog-related events retired on bty in v0.66.0
+  (they're emitted on withcache's audit log now); the remaining
+  namespaces are machine / netboot / settings / backup / auth.
 - ``subject_kind`` + ``subject_id`` together identify the entity
-  the event is about. ``machine`` / mac, ``image`` / sha or name,
-  ``catalog`` / src URL, ``boot`` / release-tag, ``settings`` /
-  panel-name. Either may be ``None`` for global events.
+  the event is about. ``machine`` / mac, ``netboot`` / artifact-name,
+  ``backup`` / backup-id, ``settings`` / panel-name. Either may be
+  ``None`` for global events.
 - ``actor`` distinguishes operator-initiated changes from
   system-initiated ones (auto-discovery, hash completion).
   See :data:`KNOWN_ACTORS` for the catalogue of conventional

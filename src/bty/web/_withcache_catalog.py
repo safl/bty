@@ -1,16 +1,17 @@
 """In-process view of withcache's catalog.
 
 Since withcache 0.9.1 the catalog lives entirely on the withcache
-side (JSON ``GET /catalog`` + Bearer-gated ``POST /catalog/entries``
-+ ``DELETE /catalog/entries?name=<name>``). bty caches a snapshot
-in memory here and every image-lookup + machine-binding read site
-hits this cache instead of a local ``catalog_entries`` table
-(dropped in the same PR that added this module).
+side; bty caches a snapshot in memory here and every image-lookup
++ machine-binding read site hits this cache instead of a local
+``catalog_entries`` table (dropped in v0.66.0).
 
-Mutations from bty's UI flow through :meth:`add` / :meth:`delete`,
-which POST/DELETE to withcache and then :meth:`refresh` to pick up
-the change. Startup wiring calls :meth:`refresh` once so the
-first render sees populated entries.
+Since withcache 0.11.0 ``GET /catalog`` returns only entries whose
+bytes are downloaded, so every entry the snapshot sees is
+flashable. Bty-web no longer exposes add / delete admin routes of
+its own; catalog mutation happens on the withcache UI, and bty's
+:meth:`refresh` pulls the resulting new snapshot on demand.
+Startup wiring calls :meth:`refresh` once so the first render
+sees populated entries.
 
 Each entry carries the same shape withcache's JSON returns:
 
