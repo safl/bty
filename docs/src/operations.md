@@ -10,14 +10,14 @@ bty-web keeps everything in one directory, `BTY_PATHS_STATE_DIR` (default
 
 | Path | What | Backup? |
 |---|---|---|
-| `state.db` | The SQLite database: machine records, MAC->image assignments, catalog metadata, server settings, sessions, and the audit log. | **Yes** -- this is the irreplaceable bit. |
+| `state.db` | The SQLite database: machine records, MAC->image bindings, server settings, sessions, and the audit log. | **Yes** -- this is the irreplaceable bit. |
 | `boot/` | The netboot artifacts (`BTY_PATHS_BOOT_DIR`: kernel / initrd / squashfs). | Optional -- re-fetchable via "Fetch netboot artifacts". |
-| `catalog.toml` | The active catalog manifest. | Optional -- re-fetchable from the upstream. |
 
-bty-web (v0.40+) holds no image bytes. Image bytes live in
-[withcache](https://github.com/safl/withcache) under
-`./data/withcache/`, populated on first flash of each URL and
-backed up independently.
+bty-web (v0.40+) holds no image bytes. Since v0.66.0 bty-web
+also no longer holds the catalog; withcache does. Withcache lives
+alongside bty-web (typical deploy is `./data/withcache/`) and is
+backed up independently -- see the sibling repo for its own
+persistence layout.
 
 A minimal backup is just `state.db`; a full backup is the whole
 `/var/lib/bty` tree.
@@ -35,7 +35,7 @@ into two classes:
 
 | Path | Class | Notes |
 |---|---|---|
-| `state.db` | precious | records: machines, catalog, settings, audit log |
+| `state.db` | precious | records: machines, settings, audit log (catalog is on withcache since v0.66.0) |
 | `boot/` | ephemeral | netboot artifacts -- **version-coupled**; refetch on a bty version bump |
 | `session-secret` | regenerable | cookie key |
 
@@ -134,11 +134,13 @@ the bottom.
 `bty-web export` / `import` subcommands are the **slim** one: they move
 only the expensive-to-recollect half -- per-machine hardware identity
 (`mac` + `lshw` + `known_disks` from the box's last live-env boot) --
-and nothing else. The catalog, machine bindings, audit log, settings,
-and netboot artifacts are deliberately left behind so an upgrade lands
-on a fresh, regenerable state and the operator re-binds. Reach for
-this to migrate hardware fingerprints across an upgrade or to a new
-host without dragging the rest along.
+and nothing else. Machine bindings, audit log, settings, and
+netboot artifacts are deliberately left behind so an upgrade lands
+on a fresh, regenerable state and the operator re-binds. The
+catalog is not part of bty's export at all (since v0.66.0 it lives
+on withcache; back that up separately). Reach for this to migrate
+hardware fingerprints across an upgrade or to a new host without
+dragging the rest along.
 
 ```bash
 # On the old server (reads BTY_PATHS_STATE_DIR):
