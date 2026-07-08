@@ -572,6 +572,21 @@ def register_ui_routes(
         # ``bty_image_ref`` (provenance ID). Operator binding stays
         # valid across rolling tags / re-fetches; the content sha
         # (``sha256``) surfaces alongside the ref when known.
+        #
+        # ``ramboot_ready`` flags each entry with whether a matching
+        # nbdmux export exists at status='ready'. The template
+        # disables options that lack one (and shows a hint) whenever
+        # the operator has boot_mode=ramboot selected -- picking a
+        # non-ready image for ramboot lands on the fallback
+        # ipxe_tui chain, which is confusing when the operator
+        # intended a warm boot.
+        with _db.open_db(state_path) as conn:
+            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+        ready_srcs: set[str] = {
+            str(row.get("src_url"))
+            for row in _ramboot.exports_by_src(nbdmux_url)
+            if row.get("status") == "ready" and row.get("src_url")
+        }
         catalog_options = [
             {
                 "bty_image_ref": e.get("bty_image_ref"),
@@ -580,6 +595,10 @@ def register_ui_routes(
                 "src": e.get("src"),
                 "disk_image_sha": e.get("sha256"),
                 "size_bytes": e.get("size_bytes"),
+                "ramboot_ready": bool(
+                    ready_srcs
+                    and (e.get("src") in ready_srcs or e.get("resolved_src") in ready_srcs)
+                ),
             }
             for e in sorted(
                 request.app.state.withcache_catalog.entries,
@@ -1163,6 +1182,10 @@ def register_ui_routes(
                 conn, _settings_store.KEY_RAMBOOT_OVERLAY_SIZE
             )
             ramboot_overlay_size_effective = _settings_store.resolve_ramboot_overlay_size(conn)
+            ramboot_extra_cmdline_override = _settings_store.get(
+                conn, _settings_store.KEY_RAMBOOT_EXTRA_CMDLINE
+            )
+            ramboot_extra_cmdline_effective = _settings_store.resolve_ramboot_extra_cmdline(conn)
         # Reachability probe: /healthz against the configured nbdmux
         # URL. Bounded to 2 s so a Settings render doesn't wedge on
         # a dead daemon. Skipped when the URL is blank -- there is
@@ -1355,6 +1378,8 @@ def register_ui_routes(
             withcache_reachable=withcache_reachable,
             ramboot_overlay_size_override=ramboot_overlay_size_override,
             ramboot_overlay_size_effective=ramboot_overlay_size_effective,
+            ramboot_extra_cmdline_override=ramboot_extra_cmdline_override,
+            ramboot_extra_cmdline_effective=ramboot_extra_cmdline_effective,
             ramboot_overlay_size_default=_settings_store.DEFAULT_RAMBOOT_OVERLAY_SIZE,
             missing_netboot_artifacts=_releases.missing_netboot_artifacts(boot_root),
             # Provenance / write-target info for the editable config
@@ -1742,6 +1767,7 @@ def register_ui_routes(
         request: Request,
         nbdmux_url: Annotated[str, Form()] = "",
         ramboot_overlay_size: Annotated[str, Form()] = "",
+        ramboot_extra_cmdline: Annotated[str, Form()] = "",
     ) -> RedirectResponse:
         """Save (or clear) the ramboot bytes-path overrides.
 
@@ -1751,16 +1777,22 @@ def register_ui_routes(
         override or the matching env / bty.toml value is set.
         ``ramboot_overlay_size`` is the default tmpfs size for the
         in-target overlay (``10G`` by default); empty reverts to
-        the default. The Linux mount layer validates the size at
-        boot time, so we accept any non-empty string here and let
-        the operator see size-format errors on the serial console
-        rather than rejecting at form-submit time.
+        the default. ``ramboot_extra_cmdline`` appends free-form
+        tokens to every ramboot kernel line -- empty by default,
+        populate for debugging (``init=/bin/sh``,
+        ``systemd.debug-shell=1``, ``break=bottom``, etc.). The
+        Linux mount layer validates the size at boot time, so we
+        accept any non-empty string here and let the operator see
+        errors on the serial console rather than rejecting at
+        form-submit time.
         """
         nbdmux = nbdmux_url.strip()
         overlay = ramboot_overlay_size.strip()
+        extra = ramboot_extra_cmdline.strip()
         with _db.open_db(state_path) as conn:
             old_nbdmux = _settings_store.get(conn, _settings_store.KEY_NBDMUX_URL)
             old_overlay = _settings_store.get(conn, _settings_store.KEY_RAMBOOT_OVERLAY_SIZE)
+            old_extra = _settings_store.get(conn, _settings_store.KEY_RAMBOOT_EXTRA_CMDLINE)
             if nbdmux:
                 _settings_store.set_value(conn, _settings_store.KEY_NBDMUX_URL, nbdmux)
             else:
@@ -1769,12 +1801,17 @@ def register_ui_routes(
                 _settings_store.set_value(conn, _settings_store.KEY_RAMBOOT_OVERLAY_SIZE, overlay)
             else:
                 _settings_store.clear(conn, _settings_store.KEY_RAMBOOT_OVERLAY_SIZE)
+            if extra:
+                _settings_store.set_value(conn, _settings_store.KEY_RAMBOOT_EXTRA_CMDLINE, extra)
+            else:
+                _settings_store.clear(conn, _settings_store.KEY_RAMBOOT_EXTRA_CMDLINE)
             _events_log.record(
                 conn,
                 kind="settings.ramboot.updated",
                 summary=(
                     f"ramboot: nbdmux_url={nbdmux or '(default)'}, "
-                    f"overlay_size={overlay or '(default)'}"
+                    f"overlay_size={overlay or '(default)'}, "
+                    f"extra_cmdline={extra or '(default)'}"
                 ),
                 subject_kind="settings",
                 subject_id="ramboot",
@@ -1783,6 +1820,7 @@ def register_ui_routes(
                 details={
                     "nbdmux_url": {"old": old_nbdmux, "new": nbdmux or None},
                     "ramboot_overlay_size": {"old": old_overlay, "new": overlay or None},
+                    "ramboot_extra_cmdline": {"old": old_extra, "new": extra or None},
                 },
             )
             conn.commit()

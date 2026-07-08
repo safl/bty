@@ -365,6 +365,24 @@
                     <code>{{ ramboot_overlay_size_effective }}</code>.
                 </div>
             </div>
+            <div class="mb-3">
+                <label for="ramboot_extra_cmdline" class="form-label">Extra kernel cmdline</label>
+                <input type="text" class="form-control font-monospace" id="ramboot_extra_cmdline"
+                       name="ramboot_extra_cmdline"
+                       placeholder="init=/bin/sh"
+                       value="{{ ramboot_extra_cmdline_override or '' }}">
+                <div class="form-text small">
+                    Free-form kernel args appended verbatim to every
+                    ramboot boot line. Empty by default; populate
+                    for debugging (<code>init=/bin/sh</code> drops
+                    into a busybox shell right after pivot_root;
+                    <code>systemd.debug-shell=1</code> enables
+                    systemd's debug shell on tty9;
+                    <code>break=bottom</code> breaks in the
+                    initramfs before pivot). Currently effective:
+                    <code>{{ ramboot_extra_cmdline_effective or '(none)' }}</code>.
+                </div>
+            </div>
             <button type="submit" class="btn btn-primary">
                 <i class="bi bi-save me-1"></i>Save ramboot
             </button>

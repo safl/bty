@@ -710,6 +710,7 @@ def create_app(
             with _db.open_db(state_path) as conn:
                 nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
                 overlay_size = _settings_store.resolve_ramboot_overlay_size(conn)
+                extra_cmdline = _settings_store.resolve_ramboot_extra_cmdline(conn)
             # Look up the ready nbdmux export whose src_url matches
             # the bound catalog entry's src. Since PR #33 export
             # names are the URL basename (not the ref), so we key
@@ -752,6 +753,7 @@ def create_app(
                     image_ref=ref,
                     export_name=export_name,
                     overlay_size=overlay_size,
+                    extra_cmdline=extra_cmdline,
                 )
                 offer_kind = "ramboot"
                 offer_summary = (

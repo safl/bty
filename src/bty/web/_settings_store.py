@@ -69,6 +69,17 @@ KEY_RAMBOOT_OVERLAY_SIZE = "ramboot.overlay_size"
 ENV_RAMBOOT_OVERLAY_SIZE = "BTY_RAMBOOT_OVERLAY_SIZE"
 DEFAULT_RAMBOOT_OVERLAY_SIZE = "10G"
 
+# Extra kernel cmdline arguments to append to every ramboot iPXE
+# offer. Empty by default; the operator sets this for debugging
+# (``init=/bin/sh`` drops into a busybox shell after pivot_root,
+# ``systemd.debug-shell=1`` enables the systemd debug shell,
+# ``break=bottom`` breaks in the initramfs before pivot). Kept
+# free-form so any future kernel arg can go in without a code
+# change. Whitespace-separated tokens are appended verbatim.
+KEY_RAMBOOT_EXTRA_CMDLINE = "ramboot.extra_cmdline"
+ENV_RAMBOOT_EXTRA_CMDLINE = "BTY_RAMBOOT_EXTRA_CMDLINE"
+DEFAULT_RAMBOOT_EXTRA_CMDLINE = ""
+
 # Display timezone for ALL operator-facing timestamps rendered by the
 # bty-web UI. bty stores timestamps as UTC; the renderer normalises to
 # the configured zone before formatting. Resolves override -> env ->
@@ -249,6 +260,21 @@ def resolve_ramboot_overlay_size(conn: sqlite3.Connection) -> str:
         or (os.environ.get(ENV_RAMBOOT_OVERLAY_SIZE) or "").strip()
     )
     return raw or DEFAULT_RAMBOOT_OVERLAY_SIZE
+
+
+def resolve_ramboot_extra_cmdline(conn: sqlite3.Connection) -> str:
+    """Extra kernel cmdline args appended to every ramboot iPXE
+    offer's ``kernel`` line. Resolves override -> env -> empty
+    string. Free-form; whitespace-separated tokens ride through
+    verbatim. Empty by default; operators set values like
+    ``init=/bin/sh`` (busybox shell after pivot) or
+    ``systemd.debug-shell=1`` when debugging a panicking image.
+    """
+    raw = (
+        get(conn, KEY_RAMBOOT_EXTRA_CMDLINE)
+        or (os.environ.get(ENV_RAMBOOT_EXTRA_CMDLINE) or "").strip()
+    )
+    return raw or DEFAULT_RAMBOOT_EXTRA_CMDLINE
 
 
 # ----- Backup schedule resolvers ----------------------------------------
