@@ -1931,8 +1931,12 @@ def purge_main(argv: list[str] | None = None, *, prog: str = "bty-lab purge") ->
         version = bty.__version__
         images = [
             f"ghcr.io/safl/bty-web:{version}",
-            "ghcr.io/safl/withcache:latest",
             f"ghcr.io/safl/bty-tftp:{version}",
+            # Sidecars use ``:latest`` (the deploy template pins by tag
+            # on ghcr.io); rmi both so a --images purge is a real
+            # clean-slate. Add every new sidecar's image here.
+            "ghcr.io/safl/withcache:latest",
+            "ghcr.io/safl/nbdmux:latest",
         ]
         # Tolerant: an image still in use elsewhere, or a tag that was
         # never pulled, shouldn't abort the purge.
@@ -1940,7 +1944,13 @@ def purge_main(argv: list[str] | None = None, *, prog: str = "bty-lab purge") ->
 
     if remove_data:
         _step("deleting host state")
-        for sub in ("bty", "withcache"):
+        # Nuke every sidecar's persistent data dir. Missing ``nbdmux``
+        # from the pre-v0.65.0 list left the warm-pipeline exports table
+        # + decompressed .img blobs behind, so a --data purge silently
+        # kept ramboot state around and the operator hit stale exports
+        # on the next deploy. Same shape for future sidecars: add the
+        # subdir here alongside its Quadlet + compose volume mount.
+        for sub in ("bty", "withcache", "nbdmux"):
             target = data_dir_abs / sub
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
