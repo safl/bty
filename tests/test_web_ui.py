@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bty.web._app import create_app
-from bty.web._releases import ARTIFACT_NAMES, SHA256_NAME
+from bty.web._releases import ARTIFACT_NAMES, SHA256_NAMES
 
 TEST_SERVICE_USER = "ui-test-user"
 TEST_SECRET_KEY = "test-secret-not-for-prod-use"
@@ -1315,23 +1315,21 @@ def test_ui_machine_detail_renders_inventory_card(client: TestClient) -> None:
 
 def test_ui_boot_page_renders_with_artifact_state(client: TestClient) -> None:
     """The /ui/netboot page must show the configured boot dir and one
-    row per expected artifact (vmlinuz/initrd/squashfs/sha256)."""
+    row per expected artifact (netboot-pc vmlinuz/initrd/squashfs +
+    ramboot-init vmlinuz/initrd + both sha256 manifests, since
+    v0.73.0)."""
     _login(client)
-    # Default landing (list section): shows the four artifacts +
+    # Default landing (list section): shows every artifact +
     # the polling JS for the active-fetches table.
     r = client.get("/ui/netboot")
     assert r.status_code == 200
     body = r.text
-    for name in (
-        ARTIFACT_NAMES[0],
-        ARTIFACT_NAMES[1],
-        ARTIFACT_NAMES[2],
-        SHA256_NAME,
-    ):
+    for name in (*ARTIFACT_NAMES, *SHA256_NAMES):
         assert name in body, name
-    # Empty boot dir => four "missing" badges (warning kind).
-    assert body.count("missing</span>") == 4
-    assert body.count('class="badge bg-warning text-dark"') >= 4
+    # Empty boot dir => one "missing" badge per expected file.
+    expected_missing = len(ARTIFACT_NAMES) + len(SHA256_NAMES)
+    assert body.count("missing</span>") == expected_missing
+    assert body.count('class="badge bg-warning text-dark"') >= expected_missing
     # v0.41.2+: the Fetch-artifacts trigger + the active-jobs tbody both
     # live on /ui/netboot directly (the old /ui/downloads page is gone).
     assert 'id="bty-downloads-fetch-artifacts-btn"' in body

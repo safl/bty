@@ -42,12 +42,34 @@ from bty import __version__ as _BTY_VERSION
 # initrd, and squashfs the iPXE template references are guaranteed to
 # be the ones built for this server's version.
 ARTIFACT_NAMES: tuple[str, ...] = (
+    # netboot-pc: the classic TUI / inventory / flash live env.
+    # Kernel + initrd + squashfs; the squashfs is the live filesystem
+    # so all three are required for a bootable chain.
     f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.vmlinuz",
     f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.initrd",
     f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.squashfs",
+    # ramboot-init: the slim kernel + initrd pair the ramboot chain
+    # references (see ipxe_ramboot.j2). No squashfs -- the initrd
+    # contains everything nbd-client + overlayfs need, then the
+    # boot pivots into the catalog image's own filesystem. Missing
+    # these two files makes the iPXE ramboot chain 404 on kernel
+    # fetch and the box falls through to whatever the firmware
+    # picks next (typically local disk).
+    f"bty-ramboot-init-x86_64-v{_BTY_VERSION}.vmlinuz",
+    f"bty-ramboot-init-x86_64-v{_BTY_VERSION}.initrd",
 )
-SHA256_NAME = f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.sha256"
-ALL_NAMES = (*ARTIFACT_NAMES, SHA256_NAME)
+SHA256_NAMES: tuple[str, ...] = (
+    f"bty-netboot-pc-x86_64-v{_BTY_VERSION}.sha256",
+    f"bty-ramboot-init-x86_64-v{_BTY_VERSION}.sha256",
+)
+# Legacy alias kept for the tests + import sites that still bind
+# ``SHA256_NAME`` (single manifest) -- points at the netboot-pc
+# sha the fetch worker verifies + writes to disk. The ramboot-init
+# sha travels alongside in the release but the fetcher does not
+# require it to succeed (kernel + initrd only, no squashfs to
+# guard against silent truncation).
+SHA256_NAME = SHA256_NAMES[0]
+ALL_NAMES = (*ARTIFACT_NAMES, *SHA256_NAMES)
 
 # Netboot release repo: the kernel / initrd / squashfs artifacts. These
 # are built and uploaded by bty's own CI, so ``safl/bty`` is the canonical
@@ -259,10 +281,16 @@ def fetch_release(
             except OSError as exc:
                 raise FetchError(f"GET {url} failed: {exc}") from exc
 
-        try:
-            _verify_sha256_manifest(tmp_path / SHA256_NAME, tmp_path)
-        except ValueError as exc:
-            raise FetchError(str(exc)) from exc
+        # Verify each variant's own manifest (netboot-pc and
+        # ramboot-init publish separate .sha256 files, each listing
+        # the artifacts built alongside it). A single all-in-one
+        # manifest would fight cijoe's live-build tooling that
+        # emits one sha per variant.
+        for manifest_name in SHA256_NAMES:
+            try:
+                _verify_sha256_manifest(tmp_path / manifest_name, tmp_path)
+            except ValueError as exc:
+                raise FetchError(str(exc)) from exc
 
         # Atomic install: rename each artifact into the live boot_dir
         # only after the manifest has verified. Same-filesystem
@@ -329,13 +357,13 @@ def _verify_sha256_manifest(manifest_path: Path, files_dir: Path) -> None:
         # Be tolerant of any whitespace separator.
         parts = line.split(maxsplit=1)
         if len(parts) != 2:
-            raise ValueError(f"malformed line in {SHA256_NAME}: {line!r}")
+            raise ValueError(f"malformed line in {manifest_path.name}: {line!r}")
         digest_expected, name = parts
         # Manifests sometimes prefix names with "*" (binary mode marker)
         # or "./"; strip both.
         name = name.lstrip("*./")
-        if name == SHA256_NAME:
-            continue  # the manifest does not include itself
+        if name in SHA256_NAMES:
+            continue  # the manifest does not include itself (or its sibling)
         target = files_dir / name
         if not target.is_file():
             raise ValueError(f"manifest references missing file: {name}")
@@ -356,4 +384,4 @@ def _verify_sha256_manifest(manifest_path: Path, files_dir: Path) -> None:
             )
         seen += 1
     if seen == 0:
-        raise ValueError(f"empty {SHA256_NAME} manifest")
+        raise ValueError(f"empty {manifest_path.name} manifest")

@@ -9,6 +9,42 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.73.0] - 2026-07-08
+
+### Fixed
+
+**Ramboot chain fell through to local-disk boot.** The
+`ipxe_ramboot.j2` template referenced
+`bty-ramboot-init-x86_64-v<version>.vmlinuz` + `.initrd` but the
+release pipeline never attached them to the GitHub release --
+only the `netboot-pc` variant was shipped. `_releases.py` also
+listed only `netboot-pc` in `ARTIFACT_NAMES`, so the fetch worker
+never tried to pull them either. iPXE hit 404 on the kernel URL
+and bailed to the next PXE offer (typically local disk). Fixed by
+adding both files to the release-attach step + `ARTIFACT_NAMES`,
+and updating the sha256 verification to walk both variants'
+manifests.
+
+**`/ui/machines` ramboot pill flapped to "not pre-warmed" on
+every SSE update.** `render_machines_tbody()` (used by the SSE
+`machines-update` stream) did not build the
+`ramboot_status_by_ref` map that the initial `/ui/machines` render
+does, so every SSE swap replaced the row with a version rendered
+without the map and the template fell through to the "not
+pre-warmed" fallback. The bug was invisible on the first page
+load (correct) but bit hard the moment the operator saved a
+ramboot binding: their own Save triggered the SSE that swapped
+the pill to red.
+
+### Added
+
+Sync-from-nbdmux button on `/ui/machines` subnav + machine detail
+Assignment card. Republishes the SSE machine-state snapshot so a
+tab showing a ramboot pill that hasn't caught up with a fresh
+nbdmux export can catch up without a full reload. The withcache
+Sync button also now republishes the same SSE event on success so
+open tabs see catalog changes immediately.
+
 ## [0.72.0] - 2026-07-08
 
 ### Added
