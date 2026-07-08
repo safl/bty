@@ -91,13 +91,14 @@ If you'd rather inspect the units before installing, `bty-lab init
 
 ## How the caching behaves
 
-The bind-mounted `bty.toml`'s `[withcache]` block wires bty to the cache. For
-an https image origin, bty does a cheap `HEAD` to withcache: when it's
-cached, the boot plan points the
-client at withcache; when the cache lacks it (or is unreachable), bty serves
-the origin directly. The probe also warms an auto-fetch withcache -- a miss
-enqueues the background fill -- so the next machine you provision hits the
-cache.
+The bind-mounted `bty.toml`'s `[withcache]` block wires bty-web to the
+cache. Since withcache 0.11.0 the trio-facing `GET /catalog` returns
+only downloaded entries, and bty-web reads that snapshot via
+`WithcacheCatalog`. When withcache is configured, every entry bty
+sees is already cached, so the boot plan always points the client at
+withcache. When withcache is not configured, bty falls back to the
+origin URL. There is no auto-fetch: the operator populates withcache
+by clicking Download on its `/ui/catalog` page for each entry.
 
 ## DHCP
 
