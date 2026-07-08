@@ -381,7 +381,18 @@ def create_app(
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     def render_machines_tbody() -> str:
-        """Render the rows fragment used by /ui/machines and the SSE stream."""
+        """Render the rows fragment used by /ui/machines and the SSE stream.
+
+        Must build ``ramboot_status_by_ref`` in the same shape
+        :func:`_ui.ui_machines` does so the ramboot pill on each row
+        renders ``ready`` / ``failed`` / etc. instead of falling
+        through to ``not pre-warmed`` on every SSE swap. Without this
+        an operator saving a ramboot binding sees the pill flash to
+        ``not pre-warmed`` the moment the SSE re-render lands even
+        though nbdmux has the export ready -- the initial page render
+        was correct but the SSE-pushed tbody replaces it with a stale
+        one.
+        """
         with _db.open_db(state_path) as conn:
             rows = conn.execute("SELECT * FROM machines ORDER BY mac").fetchall()
             # Batch-fetch labels for the SSE-pushed tbody too (the
@@ -391,8 +402,32 @@ def create_app(
                 "SELECT mac, label FROM machine_labels ORDER BY mac, label"
             ).fetchall():
                 label_map.setdefault(r["mac"], []).append(r["label"])
+            nbdmux_url = _settings_store.resolve_nbdmux_url(conn)
+        # Same {export.src_url -> status} + {bound.ref -> status}
+        # walk _ui.ui_machines does at render time.
+        _rambo_rows = _ramboot.exports_by_src(nbdmux_url)
+        ramboot_status_by_src: dict[str, str] = {
+            str(row.get("src_url")): str(row.get("status") or "")
+            for row in _rambo_rows
+            if row.get("src_url")
+        }
+        _cat = app.state.withcache_catalog
+        ramboot_status_by_ref: dict[str, str] = {}
+        for r in rows:
+            row_ref = r["bty_image_ref"]
+            if not row_ref:
+                continue
+            entry = _cat.get_by_ref(row_ref)
+            if entry is None:
+                continue
+            src = entry.get("src") or entry.get("resolved_src")
+            if src and src in ramboot_status_by_src:
+                ramboot_status_by_ref[row_ref] = ramboot_status_by_src[src]
         machines = [_ui._row_to_dict(r, label_map.get(r["mac"], [])) for r in rows]
-        return jinja.get_template("ui/_machines_tbody.html").render(machines=machines)
+        return jinja.get_template("ui/_machines_tbody.html").render(
+            machines=machines,
+            ramboot_status_by_ref=ramboot_status_by_ref,
+        )
 
     def render_dashboard_machine_panel() -> str:
         """Render the LIVE Machine Summary dashboard panel as an SSE
@@ -1905,10 +1940,40 @@ def create_app(
                 status_code=502,
                 detail=f"withcache refresh failed: {exc}",
             ) from exc
+        # Push a fresh machines-tbody so any open /ui/machines tab
+        # picks up new ramboot-status pills without the operator
+        # having to reload.
+        publish_state_changed()
         target = (return_to or "").strip()
         # Only allow local paths so a hostile form can't turn this
         # into an open redirector. bty's own forms always send an
         # in-app path starting with ``/``.
+        if target.startswith("/") and not target.startswith("//"):
+            return RedirectResponse(url=target, status_code=status.HTTP_303_SEE_OTHER)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post(
+        "/admin/nbdmux/refresh",
+        dependencies=[Depends(require_auth)],
+    )
+    def admin_nbdmux_refresh(
+        return_to: Annotated[str, Form()] = "",
+    ) -> Response:
+        """Republish the SSE machine-state snapshot.
+
+        Nbdmux exports are polled live on every render (bty keeps no
+        local mirror), so there is no cache to invalidate. But an
+        open /ui/machines tab won't see fresh nbdmux state until
+        something publishes on the SSE stream. This route triggers
+        that publish so an operator hitting Sync from nbdmux gets an
+        immediate row refresh without a full reload -- symmetric
+        with the Sync from withcache button.
+
+        Same return_to open-redirector guard as
+        /admin/withcache/refresh.
+        """
+        publish_state_changed()
+        target = (return_to or "").strip()
         if target.startswith("/") and not target.startswith("//"):
             return RedirectResponse(url=target, status_code=status.HTTP_303_SEE_OTHER)
         return Response(status_code=status.HTTP_204_NO_CONTENT)

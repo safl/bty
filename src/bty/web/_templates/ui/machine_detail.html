@@ -157,19 +157,34 @@
 <div class="card mb-4" id="assignment">
     <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-sliders me-1"></i>Assignment</span>
-        {# Sync from withcache: bty caches the catalog snapshot at
-           startup + on demand; this button triggers the on-demand
-           refresh so entries downloaded on withcache after bty
-           started appear in the Image picker below without a
-           container restart. Silent no-op when withcache isn't
-           configured. Same target as the button on Settings. #}
-        <form method="post" action="/admin/withcache/refresh" class="m-0">
-            <input type="hidden" name="return_to" value="/ui/machines/{{ m.mac }}">
-            <button type="submit" class="btn btn-sm btn-outline-primary"
-                    title="Re-poll withcache's /catalog and rebuild bty's in-memory snapshot. Do this after Downloading new entries on withcache.">
-                <i class="bi bi-arrow-clockwise me-1"></i>Sync from withcache
-            </button>
-        </form>
+        <div class="d-flex align-items-center gap-1">
+            {# Sync from withcache: bty caches the catalog snapshot at
+               startup + on demand; this button triggers the on-demand
+               refresh so entries downloaded on withcache after bty
+               started appear in the Image picker below without a
+               container restart. Silent no-op when withcache isn't
+               configured. Same target as the button on Settings. #}
+            <form method="post" action="/admin/withcache/refresh" class="m-0">
+                <input type="hidden" name="return_to" value="/ui/machines/{{ m.mac }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary"
+                        title="Re-poll withcache's /catalog and rebuild bty's in-memory snapshot. Do this after Downloading new entries on withcache.">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Sync from withcache
+                </button>
+            </form>
+            {# Sync from nbdmux: nbdmux exports are polled live on
+               every render, so the primary effect of this button is
+               to republish the SSE machine-state snapshot -- useful
+               when a background nbdmux export just went ready and
+               the /ui/machines page needs its ramboot pill
+               refreshed. Cosmetic parity with the withcache button. #}
+            <form method="post" action="/admin/nbdmux/refresh" class="m-0">
+                <input type="hidden" name="return_to" value="/ui/machines/{{ m.mac }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary"
+                        title="Republish the SSE machine-state snapshot. Do this if the ramboot pill hasn't caught up with a fresh nbdmux export.">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Sync from nbdmux
+                </button>
+            </form>
+        </div>
     </div>
     <div class="card-body">
         <form action="/ui/machines/{{ m.mac }}" method="post">

@@ -841,7 +841,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: gathered/
-          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-pc-x86_64,bty-usbboot-pc-x86_64-iso,bty-usbboot-rpi-arm64,docs-pdf}'
+          pattern: '{dist,bty-ipxe-x86_64,bty-netboot-pc-x86_64,bty-ramboot-init-x86_64,bty-usbboot-pc-x86_64-iso,bty-usbboot-rpi-arm64,docs-pdf}'
       - name: Drop the wheel from the release set
         # bty-lab is distributed via PyPI (``pipx install bty-lab``);
         # the wheel asset on the GitHub release was redundant with
@@ -919,6 +919,7 @@ jobs:
             gathered/bty-ipxe-x86_64/*
             gathered/bty-usbboot-pc-x86_64-iso/*
             gathered/bty-netboot-pc-x86_64/*
+            gathered/bty-ramboot-init-x86_64/*
             gathered/bty-usbboot-rpi-arm64/*
             gathered/docs-pdf/*
             release.toml

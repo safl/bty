@@ -19,6 +19,7 @@ from bty.web._releases import (
     ALL_NAMES,
     ARTIFACT_NAMES,
     SHA256_NAME,
+    SHA256_NAMES,
     FetchError,
     boot_artifact_shas,
     fetch_release,
@@ -43,11 +44,21 @@ def serve_artifacts(tmp_path: Path) -> Iterator[tuple[str, Path]]:
         (src / name).write_bytes(payload)
         contents[name] = payload
 
-    manifest_lines = []
-    for name in ARTIFACT_NAMES:
-        digest = hashlib.sha256(contents[name]).hexdigest()
-        manifest_lines.append(f"{digest}  {name}")
-    (src / SHA256_NAME).write_text("\n".join(manifest_lines) + "\n")
+    # Emit one manifest per variant, matching the release-pipeline's
+    # per-variant sha256 files. Each manifest lists only its own
+    # variant's artifacts; the fetch worker verifies both.
+    for manifest_name in SHA256_NAMES:
+        # ``bty-netboot-pc-x86_64-v0.73.0.sha256`` -> match artifacts
+        # starting with ``bty-netboot-pc-x86_64-``. Same policy the
+        # CI build emitter follows.
+        variant_prefix = manifest_name.rsplit(".sha256", 1)[0].rsplit("-v", 1)[0] + "-"
+        lines = []
+        for name in ARTIFACT_NAMES:
+            if not name.startswith(variant_prefix):
+                continue
+            digest = hashlib.sha256(contents[name]).hexdigest()
+            lines.append(f"{digest}  {name}")
+        (src / manifest_name).write_text("\n".join(lines) + "\n")
 
     handler_cls = type(
         "RootedHandler",
