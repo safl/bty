@@ -21,12 +21,13 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, status
 from fastapi.responses import (
     FileResponse,
     PlainTextResponse,
+    RedirectResponse,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
@@ -1877,10 +1878,12 @@ def create_app(
 
     @app.post(
         "/admin/withcache/refresh",
-        status_code=204,
         dependencies=[Depends(require_auth)],
     )
-    def admin_withcache_refresh(request: Request) -> Response:
+    def admin_withcache_refresh(
+        request: Request,
+        return_to: Annotated[str, Form()] = "",
+    ) -> Response:
         """Re-poll the configured withcache and rebuild bty's
         in-memory catalog cache.
 
@@ -1888,8 +1891,12 @@ def create_app(
         process start; a running bty won't automatically see
         entries added afterward. This admin endpoint lets an
         operator (or an integration test) force a refresh after a
-        catalog change without restarting the process. No-op with
-        a 204 when withcache isn't configured.
+        catalog change without restarting the process.
+
+        The browser-facing Sync buttons on /ui/settings and each
+        machine-detail page POST with ``return_to=<path>`` so the
+        handler 303s back where the operator clicked. JSON /
+        integration callers omit the field and get a 204.
         """
         try:
             request.app.state.withcache_catalog.refresh()
@@ -1898,6 +1905,12 @@ def create_app(
                 status_code=502,
                 detail=f"withcache refresh failed: {exc}",
             ) from exc
+        target = (return_to or "").strip()
+        # Only allow local paths so a hostile form can't turn this
+        # into an open redirector. bty's own forms always send an
+        # in-app path starting with ``/``.
+        if target.startswith("/") and not target.startswith("//"):
+            return RedirectResponse(url=target, status_code=status.HTTP_303_SEE_OTHER)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/images", response_model=list[_models.ImageEntry])

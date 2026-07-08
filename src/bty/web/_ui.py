@@ -1178,6 +1178,23 @@ def register_ui_routes(
             nbdmux_reachable = nbdmux_client.is_healthy(server=nbdmux_url_effective, timeout=2.0)
         else:
             nbdmux_reachable = None
+        # Same reachability probe for withcache. Feeds a matching
+        # pill next to the Catalog card's withcache link. Bty caches
+        # the withcache catalog snapshot in memory (refresh on
+        # startup + on demand via /admin/withcache/refresh), so an
+        # unreachable withcache is easy to miss: the snapshot may
+        # be empty and the operator has no obvious signal until
+        # they try to bind an image. The pill catches that.
+        withcache_url_effective = request.app.state.withcache_catalog.withcache_url or ""
+        withcache_reachable: bool | None
+        if withcache_url_effective:
+            from withcache import client as withcache_client
+
+            withcache_reachable = withcache_client.is_healthy(
+                server=withcache_url_effective, timeout=2.0
+            )
+        else:
+            withcache_reachable = None
         upstream = {
             "netboot_repo": netboot_repo,
             "netboot_repo_override": netboot_repo_override,
@@ -1334,6 +1351,8 @@ def register_ui_routes(
             nbdmux_url_override=nbdmux_url_override,
             nbdmux_url_effective=nbdmux_url_effective,
             nbdmux_reachable=nbdmux_reachable,
+            withcache_url_effective=withcache_url_effective,
+            withcache_reachable=withcache_reachable,
             ramboot_overlay_size_override=ramboot_overlay_size_override,
             ramboot_overlay_size_effective=ramboot_overlay_size_effective,
             ramboot_overlay_size_default=_settings_store.DEFAULT_RAMBOOT_OVERLAY_SIZE,
