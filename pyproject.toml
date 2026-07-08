@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.71.0"
+version = "0.72.0"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,7 +25,7 @@ dependencies = [
     # there (audit trail on catalog / download / miss / settings +
     # /ui/events + Health tripwire for unacknowledged failures).
     # Ceiling below 0.14 so a major bump can't slip in.
-    "withcache>=0.13.0,<0.14",
+    "withcache>=0.13.1,<0.14",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
     # bty validates readiness via ``nbdmux.client.list_exports`` at

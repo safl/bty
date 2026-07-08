@@ -16,8 +16,16 @@
             <span class="vr"></span>
             <a href="#machines-activity">Activity</a>
         </span>
+        <form method="post" action="/admin/withcache/refresh"
+              class="subnav-actions d-flex align-items-center gap-1 m-0 ms-auto">
+            <input type="hidden" name="return_to" value="/ui/machines">
+            <button type="submit" class="btn btn-sm btn-outline-light flex-shrink-0 text-nowrap"
+                    title="Re-poll withcache's catalog. Do this when you Downloaded new entries on withcache and want them in the machine-detail Image picker.">
+                <i class="bi bi-arrow-clockwise me-1"></i>Sync from withcache
+            </button>
+        </form>
         <form id="add-machine-form"
-              class="subnav-actions d-flex align-items-center gap-1 m-0 ms-auto"
+              class="subnav-actions d-flex align-items-center gap-1 m-0"
               style="min-width: 0;"
               onsubmit="return submitAddMachine(event);">
             <input type="text" required class="form-control form-control-sm font-monospace"

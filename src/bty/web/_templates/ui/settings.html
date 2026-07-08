@@ -64,14 +64,44 @@
 <div class="row g-3 mb-3">
 <div class="col-12">
 <div class="card h-100" id="catalog-source">
-    <div class="card-header bg-light fw-semibold">
-        <i class="bi bi-collection me-1"></i>Catalog
+    <div class="card-header bg-light fw-semibold d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-collection me-1"></i>Catalog</span>
+        {% if withcache_url_effective %}
+        {# Sync button: forces WithcacheCatalog.refresh() at
+           bty-web's end so a running server picks up entries the
+           operator just Downloaded on withcache. Bty caches the
+           snapshot at startup + refuses to auto-poll; without
+           this button the only sync path was a container restart. #}
+        <form method="post" action="/admin/withcache/refresh" class="m-0">
+            <input type="hidden" name="return_to" value="/ui/settings#catalog-source">
+            <button type="submit" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-arrow-clockwise me-1"></i>Sync from withcache
+            </button>
+        </form>
+        {% endif %}
     </div>
     <div class="card-body small text-muted">
         The image catalog is served by withcache. Add / edit /
         remove entries on
-        {% if withcache.url %}
-        <a href="{{ withcache.url|trim('/') }}/ui/catalog">{{ withcache.url }}/ui/catalog</a>.
+        {% if withcache_url_effective %}
+        <a href="{{ withcache_url_effective|trim('/') }}/ui/catalog">{{ withcache_url_effective|trim('/') }}/ui/catalog</a>
+        {# Reachability probe result: green pill when
+           /healthz returned 200 at render time, red pill
+           otherwise. Blank URL renders no pill. Same pattern as
+           the nbdmux pill in the Ramboot card below. #}
+        {% if withcache_reachable is sameas true %}
+        <span class="badge bg-success ms-1" title="/healthz returned 200 at page render time">
+            <i class="bi bi-broadcast me-1"></i>reachable
+        </span>
+        {% elif withcache_reachable is sameas false %}
+        <span class="badge bg-danger ms-1" title="/healthz did NOT return 200 at page render time (typo? daemon down? firewall?)">
+            <i class="bi bi-exclamation-triangle me-1"></i>unreachable
+        </span>
+        {% endif %}
+        . Bty caches the catalog snapshot in memory (refresh
+        happens on startup and on demand via the button above);
+        entries you Download on withcache after bty started are
+        invisible to bty-web until you Sync.
         {% else %}
         the withcache server's <code>/ui/catalog</code> page. Set
         <em>Withcache URL</em> in the Ramboot card below (bty and

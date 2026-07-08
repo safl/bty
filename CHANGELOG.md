@@ -9,6 +9,32 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.72.0] - 2026-07-08
+
+### Added
+
+Sync-from-withcache buttons on `/ui/settings`, `/ui/machines`, and
+the machine detail page. Bty caches the withcache catalog snapshot
+in memory at startup + on demand; without an explicit refresh
+button the only way to pick up entries downloaded on withcache
+after bty started was a container restart. The button POSTs to
+`/admin/withcache/refresh` (already existed since v0.66.0) with a
+`return_to` field so the browser lands back where the operator
+clicked instead of on the 204 response body.
+
+Withcache reachability pill on `/ui/settings` mirroring the
+existing nbdmux pill: green when `GET <withcache>/healthz` returns
+200 at render time, red otherwise. Requires
+`withcache>=0.13.1` for the `client.is_healthy` helper.
+
+### Changed
+
+`POST /admin/withcache/refresh` now honours a `return_to` form
+field (must start with `/` and not `//` -- open-redirector guard).
+Existing JSON / integration callers omit the field and still get a
+204. Trio floor for withcache lifted to
+`withcache>=0.13.1,<0.14`.
+
 ## [0.71.0] - 2026-07-08
 
 ### Changed
