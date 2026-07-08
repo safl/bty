@@ -9,6 +9,25 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.74.0] - 2026-07-08
+
+### Added
+
+Image picker on `/ui/machines/{mac}` now flags catalog entries
+whose src doesn't match a `status=ready` nbdmux export ("no
+ready nbdmux export" suffix). When boot_mode=ramboot is selected
+the picker disables those options entirely -- picking one would
+otherwise silently land on the ipxe-tui fallback chain at PXE
+time. Purely additive for flash modes; the pill stays gray.
+
+`ramboot.extra_cmdline` persistent setting (env
+`BTY_RAMBOOT_EXTRA_CMDLINE`, form field on Settings > Ramboot).
+Appends free-form tokens to every ramboot kernel line. Empty by
+default; populate with `init=/bin/sh` (busybox shell after
+pivot), `systemd.debug-shell=1` (systemd's tty9 debug shell), or
+`break=bottom` (initramfs shell before pivot) when debugging a
+panicking image.
+
 ## [0.73.1] - 2026-07-08
 
 ### Fixed

@@ -245,16 +245,25 @@
             <div class="mb-3" data-policy-relevant="bty-flash-always bty-flash-once ramboot">
                 <label class="form-label" for="bty_image_ref">Image
                     <span class="policy-usage small text-muted fw-normal ms-1"></span></label>
-                <select name="bty_image_ref" id="bty_image_ref" class="form-select">
+                <select name="bty_image_ref" id="bty_image_ref" class="form-select"
+                        data-ramboot-gate="1">
                     <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
                     {# img is a WithcacheCatalog entry: ``bty_image_ref``
                        is the option value. Since withcache v0.11.0
                        every entry in the catalog is downloaded by
-                       definition, so every row here is bindable. #}
+                       definition, so every row here is bindable for
+                       flash policies. Ramboot needs a matching ready
+                       nbdmux export -- ``ramboot_ready`` reflects
+                       that. The inline script below disables options
+                       whose ``ramboot_ready`` is false when
+                       boot_mode=ramboot, so the operator does not
+                       accidentally pick an image that would fall
+                       through to the ipxe-tui recovery chain. #}
                     <option value="{{ img.bty_image_ref }}"
+                            data-ramboot-ready="{{ 'true' if img.ramboot_ready else 'false' }}"
                             {% if img.bty_image_ref == m.bty_image_ref %}selected{% endif %}>
-                        {{ img.name }} ({{ img.format or "?" }}{% if img.size_bytes %}, {{ img.size_bytes | filesizeformat(true) }}{% endif %}, ref {{ img.bty_image_ref[:8] }})
+                        {{ img.name }} ({{ img.format or "?" }}{% if img.size_bytes %}, {{ img.size_bytes | filesizeformat(true) }}{% endif %}, ref {{ img.bty_image_ref[:8] }}){% if not img.ramboot_ready %} -- no ready nbdmux export{% endif %}
                     </option>
                     {% endfor %}
                 </select>
@@ -371,8 +380,34 @@
         });
     }
 
-    policySelect.addEventListener("change", applyUsage);
+    // Ramboot gate on the image picker: when the operator selects
+    // boot_mode=ramboot, disable image options whose
+    // ``data-ramboot-ready`` is "false" (no matching status='ready'
+    // nbdmux export). Prevents the operator from accidentally binding
+    // an image whose PXE boot would fall through to the ipxe-tui
+    // fallback chain. Other boot modes leave every option enabled.
+    const imgSelect = document.querySelector("select[data-ramboot-gate]");
+
+    function applyRambootGate() {
+        if (!imgSelect) return;
+        const isRamboot = policySelect.value === "ramboot";
+        imgSelect.querySelectorAll("option[data-ramboot-ready]").forEach((opt) => {
+            const ready = opt.getAttribute("data-ramboot-ready") === "true";
+            opt.disabled = isRamboot && !ready;
+        });
+        // If the currently-selected option is now disabled, drop the
+        // binding so the operator doesn't Save a stale mismatch.
+        if (imgSelect.selectedOptions.length && imgSelect.selectedOptions[0].disabled) {
+            imgSelect.value = "";
+        }
+    }
+
+    policySelect.addEventListener("change", () => {
+        applyUsage();
+        applyRambootGate();
+    });
     applyUsage();
+    applyRambootGate();
 })();
 </script>
 
