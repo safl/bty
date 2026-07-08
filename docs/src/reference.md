@@ -457,10 +457,11 @@ Bootstrap CSS, HTMX form posts).
  restarting bty-web; to invalidate every session at once, rotate the
  cookie-signing secret with `rm /var/lib/bty/session-secret &&
  systemctl restart bty-web`.
-- `POST /ui/settings/upstream` -> persists the netboot repo / tag and
- the withcache URL into the `settings` table; fetch routes resolve
- from this at request time so the changes take effect without a
- restart.
+- `POST /ui/settings/upstream` -> persists the netboot repo / tag
+ into the `settings` table; fetch routes resolve from this at
+ request time so the changes take effect without a restart. The
+ withcache URL knob moved to /ui/settings#ramboot in v0.66.1 (bty
+ + nbdmux both read the same value).
 - `POST /ui/settings/backup` -> persists the scheduled-backup knobs
  (enabled / cadence / retention); the scheduler picks them up on the
  next 60s tick.
