@@ -17,7 +17,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -165,7 +165,7 @@ def create_app(
     backup_manager = _backup.BackupManager()
 
     @asynccontextmanager
-    async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         import logging as _logging
 
         _lifespan_log = _logging.getLogger(__name__)
@@ -1919,10 +1919,9 @@ def create_app(
         unified = _list_unified_images()
         out: list[_models.ImageEntry] = []
         for u in unified:
-            # Every catalog row carries an upstream URL (manifest
-            # or operator-curated). Skip anything that doesn't -- a
-            # dir-scan-only entry with no source can't be flashed
-            # over the wire.
+            # Every catalog row carries an upstream URL. Skip any
+            # entry whose source list is empty (shouldn't happen
+            # post-v0.66.0 but the defensive skip is cheap).
             upstream = next(
                 (s.location for s in u.sources if s.kind in ("manifest", "url")),
                 None,
@@ -1948,19 +1947,15 @@ def create_app(
         the ``bty.catalog.Catalog`` schema (``version=1``, ``[[images]]``
         entries with ``name``/``src``/``sha256``/``format``/``size_bytes``).
 
-        Same set of rows as ``GET /images`` (manifest + dir-scan +
-        operator-curated DB entries), but serialised so ``bty
+        Same set of rows as ``GET /images``, serialised so ``bty
         --catalog`` clients can consume it with the same code path
         they use for static files hosted on e.g. GitHub. Open route,
         same trust model as ``/images``.
 
-        Contract: a catalog manifest carries only REMOTE srcs (the
-        receiver can't resolve ``file://`` off the publisher's host).
-        Locally-cached entries are rewritten to
-        ``http://<this-server>/images/...``; dir-scan-only entries
-        (file:// only, no sha + no upstream URL) are skipped. Any
-        entry that would still leak a ``file://`` is dropped
-        defensively below.
+        Contract: a catalog manifest carries only REMOTE srcs. Post
+        v0.66.0 every unified image already comes from the withcache
+        catalog so every entry has a remote src; the defensive
+        ``file://`` skip below is a no-op in practice.
 
         Withcache rewrite: when a withcache URL is configured the
         upstream branch rewrites EVERY entry's src (oras + https)
