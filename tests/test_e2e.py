@@ -143,53 +143,28 @@ def _seed_catalog(
 def test_e2e_real_default_catalog_round_trips_through_probe_url(
     app_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Generate the actual ``scripts/generate_catalog_toml.py`` default
-    catalog (rolling oras tags + GitHub release URL, human names with
-    spaces and parens, NO sha pins), upload it via the bty-web
-    ``/ui/catalog/upload`` endpoint, fetch ``/catalog.toml`` back,
-    and run every entry's ``src`` through ``flash.probe_image_url``
-    with the catalog's declared format as a hint.
+    """Seed the withcache-catalog snapshot with a rolling / spaced /
+    paren'd default-shape catalog and run every entry's ``src``
+    through ``flash.probe_image_url`` with the catalog's declared
+    format as a hint.
 
-    Asserts:
-      * Each entry's src parses without ``InvalidURL`` (regression for
-        the unencoded-spaces bug fixed in v0.20.3).
-      * ``probe_image_url`` returns a valid ImageInfo with a
-        recognized ``format`` (regression for v0.20.8's "image format
-        not recognised" bug -- the URL filename has no extension when
-        the catalog name is human text).
-      * No ``InvalidURL`` from ``http.client._validate_path``.
-      * For HTTP entries, the HEAD probe doesn't fail with 405
-        (regression for v0.20.7's HEAD-not-allowed bug).
+    Regression coverage:
+
+    * Each entry's src parses without ``InvalidURL`` (v0.20.3
+      unencoded-spaces bug).
+    * ``probe_image_url`` returns a valid ImageInfo with a
+      recognized ``format`` (v0.20.8 "image format not recognised"
+      bug -- the URL filename has no extension when the catalog
+      name is human text).
+    * No ``InvalidURL`` from ``http.client._validate_path``.
+    * For HTTP entries, the HEAD probe doesn't fail with 405
+      (v0.20.7's HEAD-not-allowed bug).
+
+    Since v0.66.0 the catalog lives on withcache; bty-web reads a
+    snapshot into ``app.state.withcache_catalog``, so this test
+    seeds that snapshot directly rather than uploading a catalog
+    manifest via a bty-web route.
     """
-    # The default catalog ships rolling-tag entries with NO sha
-    # pin. bty-web's ``/catalog.toml`` deliberately skips no-sha
-    # entries (the ``bty`` consumer requires shas for binding), so
-    # to round-trip we upload sha-pinned versions of the same
-    # shape -- same name format (spaces + parens), same URL types
-    # (https with no path extension, oras://). That exercises the
-    # path that broke in v0.20.3 / v0.20.8 without fighting the
-    # /catalog.toml no-sha filter.
-    body = (
-        b"version = 1\n"
-        b"\n"
-        b'[[images]]\nname = "nosi debian-sysdev (x86_64, rolling)"\n'
-        b'src = "https://example.invalid/debian"\n'
-        b'sha256 = "' + b"a" * 64 + b'"\n'
-        b'format = "img.gz"\n'
-        b"\n"
-        b'[[images]]\nname = "nosi fedora-sysdev (x86_64, rolling)"\n'
-        b'src = "https://example.invalid/fedora"\n'
-        b'sha256 = "' + b"b" * 64 + b'"\n'
-        b'format = "img.gz"\n'
-        b"\n"
-        b'[[images]]\nname = "bty-server (x86_64, latest)"\n'
-        b'src = "https://example.invalid/bty-server"\n'
-        b'sha256 = "' + b"c" * 64 + b'"\n'
-        b'format = "img.gz"\n'
-    )
-    # Seed the withcache-catalog cache directly (the /ui/catalog/upload
-    # route was removed in v0.66.0; withcache owns the catalog).
-    del body
     entries = [
         {
             "name": "nosi debian-sysdev (x86_64, rolling)",

@@ -4218,34 +4218,6 @@ def test_release_fetch_manager_enqueue_rejects_malformed_tag() -> None:
     asyncio.run(go())
 
 
-class _FakeUrlopenResp:
-    """Stub for ``urllib.request.urlopen`` context-manager value.
-
-    Used by every ``/ui/catalog/fetch-release`` test to swap out
-    the real HTTP fetch. Returns the canned bytes via ``read()``
-    -- which the production handler now calls with a size cap
-    argument, so the stub honours it instead of dumping the
-    whole body and forcing the caller to remember the cap.
-    """
-
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-
-    def read(self, size: int = -1) -> bytes:
-        if size < 0:
-            return self._data
-        return self._data[:size]
-
-    def __enter__(self) -> _FakeUrlopenResp:
-        return self
-
-    def __exit__(self, *_a: object) -> None:
-        return None
-
-
-# ---------- /ui/catalog/upload and /ui/catalog/fetch-release error matrix --
-
-
 def test_ui_machines_renders_timestamps_compactly(app_client: TestClient, tmp_path: Path) -> None:
     """The ``fmt_ts`` Jinja filter trims ISO 8601 timestamps to
     ``YYYY-MM-DD HH:MM:SS`` for display on /ui/machines and
