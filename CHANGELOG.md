@@ -9,6 +9,19 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.73.1] - 2026-07-08
+
+### Fixed
+
+`bty-lab purge --data` left `<data-dir>/nbdmux/` behind, so the
+warm-pipeline exports table + decompressed `.img` files
+persisted across a "clean-slate" deploy and the next stack came
+up with stale ramboot state. Same shape for `bty-lab purge
+--images`: the nbdmux image tag was not in the rmi list.
+Fixed both -- purge now walks every sidecar's data dir and image
+tag. Regression tests pin the shape so a future sidecar addition
+has to touch both lists together.
+
 ## [0.73.0] - 2026-07-08
 
 ### Fixed

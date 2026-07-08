@@ -1054,6 +1054,60 @@ def test_purge_data_and_all_remove_state_and_dir(
     assert not dest.exists()  # --all removed the whole deploy dir
 
 
+def test_purge_data_wipes_every_sidecar_state_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _patched_runtime: dict[str, list],
+) -> None:
+    """--data must nuke every sidecar's persistent data dir, not just
+    bty + withcache. Missing ``nbdmux`` from the pre-v0.73.1 list
+    silently kept the warm-pipeline exports table + decompressed .img
+    blobs behind, so the next deploy hit stale ramboot state."""
+    dest = tmp_path / "bty-host"
+    monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 1000)
+    deploy_mod.deploy_main([str(dest)])
+    # Seed a file in each sidecar's data dir so we can assert the
+    # rmtree actually ran (data_dir_abs / sub was fully removed).
+    for sub in ("bty", "withcache", "nbdmux"):
+        (dest / "data" / sub).mkdir(parents=True, exist_ok=True)
+        (dest / "data" / sub / "canary").write_text("keep me")
+    _patched_runtime["run"].clear()
+
+    deploy_mod.purge_main([str(dest), "--data", "--yes"])
+
+    for sub in ("bty", "withcache", "nbdmux"):
+        assert not (dest / "data" / sub).exists(), (
+            f"purge --data left {sub}/ behind -- regression of the "
+            f"nbdmux state carrying across deploys bug"
+        )
+    # The deploy dir itself must survive (only --all removes it).
+    assert dest.exists()
+
+
+def test_purge_images_removes_every_sidecar_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _patched_runtime: dict[str, list],
+) -> None:
+    """--images must remove every sidecar's ghcr image so a
+    clean-slate purge picks up the latest tag on the next deploy.
+    Regression: pre-v0.73.1 the list was missing nbdmux."""
+    dest = tmp_path / "bty-host"
+    monkeypatch.setattr(deploy_mod.os, "geteuid", lambda: 1000)
+    deploy_mod.deploy_main([str(dest)])
+    _patched_runtime["run"].clear()
+
+    deploy_mod.purge_main([str(dest), "--images", "--yes"])
+
+    run_cmds = [cmd for cmd, _ in _patched_runtime["run"]]
+    rmi = next(c for c in run_cmds if len(c) >= 2 and c[:2] == ["podman", "rmi"])
+    tags = set(rmi[2:])
+    assert any(t.startswith("ghcr.io/safl/bty-web:") for t in tags)
+    assert any(t.startswith("ghcr.io/safl/bty-tftp:") for t in tags)
+    assert "ghcr.io/safl/withcache:latest" in tags
+    assert "ghcr.io/safl/nbdmux:latest" in tags
+
+
 def test_purge_quadlet_managed_as_root_stops_and_removes_units(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
