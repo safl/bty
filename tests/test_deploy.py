@@ -270,7 +270,9 @@ def test_systemd_nbdmux_quadlet_has_ports_volumes_and_withcache_url(
     nbdmux = (dest / "quadlet" / "nbdmux.container").read_text(encoding="utf-8")
     assert "Image=ghcr.io/safl/nbdmux:latest" in nbdmux
     assert "PublishPort=8082:8082" in nbdmux
-    assert "PublishPort=10809:10809" in nbdmux
+    # nbdmux v0.8.1+ publishes a port range so per-export nbdkit
+    # instances (10810, 10811, ...) are reachable on the host.
+    assert "PublishPort=10809-10819:10809-10819" in nbdmux
     data_abs = (dest / "data").resolve()
     assert f"Volume={data_abs}/nbdmux:/data:Z" in nbdmux
     assert f"Volume={data_abs}/nbdmux/images:/images:Z" in nbdmux

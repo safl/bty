@@ -723,6 +723,7 @@ def create_app(
                 else None
             )
             export_name: str | None = None
+            export_nbd_port: int | None = None
             if nbdmux_url and ref:
                 for row in _ramboot.exports_by_src(nbdmux_url):
                     if row.get("status") != "ready":
@@ -730,26 +731,38 @@ def create_app(
                     # Prefer matching by src_url (canonical since PR
                     # #33); fall back to name==ref for legacy exports
                     # still keyed on the ref.
+                    matched = False
                     if entry_src and row.get("src_url") == entry_src:
                         export_name = str(row.get("name") or "") or None
-                        break
-                    if row.get("name") == ref:
+                        matched = True
+                    elif row.get("name") == ref:
                         export_name = ref
+                        matched = True
+                    if matched:
+                        # nbdmux v0.8.1+ spawns one nbdkit per export,
+                        # each on its own TCP port; the row exposes
+                        # ``nbd_port`` so we template it into iPXE.
+                        # Legacy nbdmux <0.8.1 doesn't populate the
+                        # field; default back to the base 10809 so
+                        # the fallback keeps working for older sidecars.
+                        maybe_port = row.get("nbd_port")
+                        export_nbd_port = int(maybe_port) if isinstance(maybe_port, int) else 10809
                         break
             ramboot_ready = export_name is not None
             if nbdmux_url and ref and ramboot_ready:
                 # Derive the NBD host from the configured HTTP control
-                # plane URL: same hostname, port 10809 (nbd-server's
-                # listener; bty-web posts exports against port 8082).
+                # plane URL: same hostname, ``nbd_port`` from the
+                # export row (per-export in nbdmux >= 0.8.1).
                 parsed = urllib.parse.urlsplit(nbdmux_url)
                 nbd_host = parsed.hostname or host.split(":")[0]
+                nbd_port = export_nbd_port or 10809
                 template = jinja.get_template("ipxe_ramboot.j2")
                 rendered = template.render(
                     mac=normalised,
                     machine=machine,
                     host=host,
                     nbd_host=nbd_host,
-                    nbd_port=10809,
+                    nbd_port=nbd_port,
                     image_ref=ref,
                     export_name=export_name,
                     overlay_size=overlay_size,
@@ -757,11 +770,11 @@ def create_app(
                 )
                 offer_kind = "ramboot"
                 offer_summary = (
-                    f"{normalised} offered ramboot via nbd://{nbd_host}:10809/{export_name}"
+                    f"{normalised} offered ramboot via nbd://{nbd_host}:{nbd_port}/{export_name}"
                 )
                 offer_details = {
                     "offer": "ramboot",
-                    "nbd_endpoint": f"tcp://{nbd_host}:10809",
+                    "nbd_endpoint": f"tcp://{nbd_host}:{nbd_port}",
                     "image_ref": ref,
                     "export_name": export_name,
                     "overlay_size": overlay_size,
