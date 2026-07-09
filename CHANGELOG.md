@@ -9,6 +9,42 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.77.1] - 2026-07-11
+
+### Fixed
+
+Ramboot fallback path (bty-media-baked ramboot-init variant,
+used when the catalog entry has no matching nosi netboot bundle)
+picks up three initramfs-driver fixes that regressed on real
+hardware during v0.76 bring-up.
+
+`/etc/fstab` strip in the overlay upperdir now writes to
+`/upper/up/etc/fstab` instead of `/upper/etc/fstab`. The
+overlayfs mount uses `upperdir=/upper/up`; writes anywhere else
+land outside the pivoted view. The typo meant the guest still
+saw the lower's fstab and systemd tried to mount the image's
+`/boot` (+ `/boot/efi`) from the NBD-backed partitions, wedging
+jbd2 within 120s once systemd-networkd flushed the NIC.
+
+systemd-networkd + cloud-init are masked in the overlay upper
+via `ln -sf /dev/null` before pivot. Under ramboot the root
+filesystem lives on the NIC the initramfs configured, so a
+userspace network-reset (which networkd + cloud-init's network
+stage both do by default) tears down the socket the kernel is
+reading root pages from and every process wedges in D-state on
+the ensuing page fault.
+
+`/etc/resolv.conf` is seeded in the overlay upper from
+ipconfig's `/run/net-*.conf` (DNSSERVERS + DOMAINSEARCH) so the
+guest can resolve names after pivot -- previously the
+networkd/cloud-init mask left the guest with no resolver and
+`apt-get update` / DNS-dependent services silently 404'd.
+
+Fallback-path-only: on v0.77.0's image-native kernel path (when
+`netboot_ready=True` and iPXE points at nbdmux's
+`/artifacts/<export>/{vmlinuz,initrd}`), the fresh nosi bundle
+carries the corrected script and this changelog doesn't apply.
+
 ## [0.77.0] - 2026-07-10
 
 ### Added
