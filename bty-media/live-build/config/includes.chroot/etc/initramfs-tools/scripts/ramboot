@@ -31,8 +31,32 @@ case "${1:-}" in
     prereqs) prereqs; exit 0 ;;
 esac
 
+# Diagnostic trace helper -- prints to kernel log buffer (visible in
+# dmesg + on the boot console) so the operator can tell whether
+# ``mountroot`` was even entered and, if so, which step failed. Cheap
+# to leave in place; the boot output already carries kernel spew.
+_ramboot_trace() { echo "ramboot: $*" >/dev/kmsg 2>/dev/null || echo "ramboot: $*"; }
+
+# initramfs-tools' ``panic`` spawns ``sh -i`` on /dev/console and
+# RETURNS if that shell exits. On serial without a controlling
+# terminal the shell exits immediately, so ``panic`` becomes a no-op
+# and mountroot merrily continues through every subsequent broken
+# step, papering over the real failure. Use ``_ramboot_die`` instead
+# to trace, best-effort POST, and then hang PID 1 so the operator
+# can actually read the message on the boot console.
+_ramboot_die() {
+    _ramboot_trace "FATAL: $*"
+    _post_status "ramboot.die"
+    # Replace this shell with a permanent sleep so /init can't
+    # continue past a failed step. The kernel keeps PID 1 alive and
+    # the console stays readable.
+    exec /bin/busybox sleep 2147483647
+}
+
+_ramboot_trace "script sourced (BOOT=ramboot)"
+
 # initramfs-tools' standard library (provides ``log_begin_msg``,
-# ``log_end_msg``, ``panic``, etc.)
+# ``log_end_msg``, ``panic``, ``configure_networking``, etc.)
 # shellcheck disable=SC1091
 . /scripts/functions
 
@@ -59,6 +83,7 @@ _post_status() {
 }
 
 mountroot() {
+    _ramboot_trace "mountroot() entered"
     nbd_url="$(_get_cmdline bty.nbd)"
     image="$(_get_cmdline bty.image)"
     overlay_size="$(_get_cmdline bty.overlay_size)"
@@ -68,8 +93,10 @@ mountroot() {
     # writing logs + scratch state; operator caps with bty.overlay_size.
     : "${overlay_size:=10G}"
 
+    _ramboot_trace "cmdline nbd=${nbd_url:-<unset>} image=${image:-<unset>} overlay_size=${overlay_size} root_part=${root_part_override:-<auto>}"
+
     if [ -z "$nbd_url" ] || [ -z "$image" ]; then
-        panic "ramboot: missing bty.nbd or bty.image on kernel cmdline"
+        _ramboot_die "missing bty.nbd or bty.image on kernel cmdline"
     fi
 
     # nbd_url is ``tcp://<host>:<port>``. Strip the scheme and split.
@@ -77,25 +104,58 @@ mountroot() {
     nbd_host="${nbd_host%%:*}"
     nbd_port="${nbd_url##*:}"
 
+    _ramboot_trace "modprobe nbd (nbds_max=1 max_part=16) + overlay"
     log_begin_msg "ramboot: modprobe nbd + overlay"
-    modprobe nbd nbds_max=1 || panic "ramboot: modprobe nbd failed"
-    modprobe overlay || panic "ramboot: modprobe overlay failed"
+    # ``max_part=16`` is essential: without it the nbd module leaves
+    # /dev/nbd0 as a single flat device and NEVER exposes the
+    # partition device nodes we scan for below. Debian's default is
+    # ``max_part=0``.
+    modprobe nbd nbds_max=1 max_part=16 || _ramboot_die "modprobe nbd failed"
+    modprobe overlay || _ramboot_die "modprobe overlay failed"
     log_end_msg
 
+    # iPXE releases its DHCP lease when it chainloads the kernel, so
+    # userspace has to redo network setup before nbd-client can talk
+    # to nbdmux. configure_networking() (from /scripts/functions) does
+    # DHCP via ipconfig(8) on the auto-detected NIC. Fatal on
+    # failure -- nbd-client cannot succeed without a route to the
+    # server.
+    _ramboot_trace "configure_networking (DHCP via ipconfig)"
+    log_begin_msg "ramboot: configure_networking"
+    configure_networking || _ramboot_die "configure_networking failed (DHCP)"
+    log_end_msg
+    _ramboot_trace "network up: $(/bin/busybox ip -o -4 addr show 2>/dev/null | /bin/busybox awk '{print $2, $4}' | /bin/busybox tr '\n' ';')"
+
+    _ramboot_trace "nbd-client ${nbd_host}:${nbd_port} -name ${image}"
     log_begin_msg "ramboot: nbd-client ${nbd_host}:${nbd_port} -name ${image}"
     if ! nbd-client "$nbd_host" "$nbd_port" -name "$image" /dev/nbd0; then
         _post_status "ramboot.nbd_connect_failed"
-        panic "ramboot: nbd-client failed to connect to ${nbd_host}:${nbd_port}"
+        _ramboot_die "nbd-client failed to connect to ${nbd_host}:${nbd_port}"
     fi
     log_end_msg
 
-    # Settle: nbd's BLKRRPART needs a beat for the partition device
-    # nodes to appear in /dev.
+    # ``nbd-client`` returns as soon as the client-side attach ioctl
+    # is done, but the kernel commits the capacity change + partition
+    # scan asynchronously via a workqueue. Racing partprobe before
+    # the capacity event lands leaves /dev/nbd0 sized 0 and produces
+    # NO partition nodes at all (been there). Poll for size > 0
+    # before scanning; give up after ~10s.
+    i=0
+    while [ "$i" -lt 100 ]; do
+        nbd0_size="$(/bin/busybox blockdev --getsize64 /dev/nbd0 2>/dev/null || echo 0)"
+        [ "${nbd0_size:-0}" -gt 0 ] && break
+        /bin/busybox sleep 0.1
+        i=$((i + 1))
+    done
+    _ramboot_trace "nbd0 capacity ready after ${i} tick(s): ${nbd0_size:-0} bytes"
+
     udevadm settle --timeout=10 || true
     /bin/busybox partprobe /dev/nbd0 2>/dev/null || true
     udevadm settle --timeout=10 || true
+    _ramboot_trace "nbd0 nodes: $(/bin/busybox ls -1 /dev/nbd0* 2>/dev/null | /bin/busybox tr '\n' ' ')"
 
-    # Pick root partition: explicit override > largest partition.
+    # Pick root partition: explicit override > largest partition >
+    # whole /dev/nbd0 (filesystem-only images, no partition table).
     if [ -n "$root_part_override" ]; then
         root_part="$root_part_override"
     else
@@ -104,38 +164,49 @@ mountroot() {
             | xargs -0 -I{} /bin/busybox sh -c 'echo "$(blockdev --getsize64 "$1") $1"' _ {} \
             | sort -n | tail -1 | cut -d' ' -f2
         )"
+        # No partition nodes at all -- the export is a raw filesystem
+        # (nosi bakes ext4 blobs, not disk images with a partition
+        # table). Use the whole nbd0 device as the root.
+        if [ -z "$root_part" ] && [ -e /dev/nbd0 ]; then
+            root_part=/dev/nbd0
+        fi
     fi
+    _ramboot_trace "picked root_part=${root_part:-<none>}"
     if [ -z "$root_part" ] || [ ! -e "$root_part" ]; then
         _post_status "ramboot.no_root_partition"
-        panic "ramboot: could not pick a root partition on /dev/nbd0"
+        _ramboot_die "could not pick a root partition on /dev/nbd0"
     fi
 
     mkdir -p /lower /upper /root
+    _ramboot_trace "mount ro ${root_part} -> /lower"
     log_begin_msg "ramboot: mounting ${root_part} ro at /lower"
     if ! mount -o ro "$root_part" /lower; then
         _post_status "ramboot.mount_root_failed"
-        panic "ramboot: failed to mount ${root_part}"
+        _ramboot_die "failed to mount ${root_part}"
     fi
     log_end_msg
 
+    _ramboot_trace "tmpfs(${overlay_size}) -> /upper"
     log_begin_msg "ramboot: tmpfs(${overlay_size}) at /upper"
     if ! mount -t tmpfs -o "size=${overlay_size}" tmpfs /upper; then
         _post_status "ramboot.mount_tmpfs_failed"
-        panic "ramboot: failed to mount tmpfs at /upper"
+        _ramboot_die "failed to mount tmpfs at /upper"
     fi
     mkdir -p /upper/up /upper/work
     log_end_msg
 
+    _ramboot_trace "overlay(lower=/lower,upper=/upper/up,work=/upper/work) -> /root"
     log_begin_msg "ramboot: overlayfs at /root"
     if ! mount -t overlay overlay \
         -o "lowerdir=/lower,upperdir=/upper/up,workdir=/upper/work" \
         /root
     then
         _post_status "ramboot.mount_overlay_failed"
-        panic "ramboot: failed to mount overlayfs at /root"
+        _ramboot_die "failed to mount overlayfs at /root"
     fi
     log_end_msg
 
+    _ramboot_trace "mountroot() done -- returning to /init for pivot_root"
     _post_status "ramboot.up"
     # initramfs-tools' /init pivot_root's into /root and exec's
     # /sbin/init from here.

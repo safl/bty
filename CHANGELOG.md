@@ -9,6 +9,72 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.75.0] - 2026-07-09
+
+### Fixed
+
+Ramboot initramfs driver
+(`bty-media/.../scripts/ramboot`) reworked after real-hardware
+diagnostic on the GIGABYTE MC12-LE0 target. Six independent
+issues each blocked the pivot; the driver is now defensive at
+every step and traces its progress to `/dev/kmsg` so a boot
+console tells you exactly which stage failed. Concretely:
+
+`modprobe nbd` now loads with `max_part=16` (was default
+`max_part=0`). Without this the kernel never creates partition
+device nodes on `/dev/nbd0` even for partitioned disk images, so
+the whole-device fallback ran on an MBR/GPT header instead of a
+filesystem and every mount attempt failed.
+
+`configure_networking` runs before `nbd-client`. iPXE releases
+its DHCP lease when it chainloads the kernel, and Linux userspace
+had no route to nbdmux until the ramboot script ran its own
+DHCP. Previously nbd-client's connection failed silently and the
+initramfs continued through a chain of half-broken mounts before
+`/init` gave up.
+
+`_ramboot_die` replaces the initramfs-tools `panic` function on
+every failure branch. Stock `panic()` spawns `sh -i` on
+`/dev/console` and RETURNS when that shell exits; on serial
+consoles with no controlling terminal it exits instantly, so
+`panic` was a no-op and `mountroot` merrily continued through
+every subsequent broken step. `_ramboot_die` traces the reason
+via `/dev/kmsg`, best-effort POSTs to bty, then
+`exec sleep 2147483647` so PID 1 stays alive and the operator can
+actually read the failure on the console.
+
+Whole-device fallback when `/dev/nbd0` has no partition table.
+nosi bakes raw filesystem images with no MBR/GPT, so the partition
+picker returned empty on those and the pivot never happened. Now
+falls back to `/dev/nbd0` when no `nbd0p*` nodes exist.
+
+`blockdev --getsize64 /dev/nbd0` poll before `partprobe`.
+`nbd-client` returns as soon as the client-side attach ioctl
+completes, but the kernel commits capacity + partition scan
+asynchronously via a workqueue. Running `partprobe` before the
+capacity landed produced no partition nodes at all; the poll (up
+to 10 s in 100 ms ticks) guarantees a real size is present before
+we scan.
+
+`_ramboot_trace` emits every stage transition to `/dev/kmsg`
+with a `ramboot:` prefix. `mountroot()` entry, cmdline snapshot,
+DHCP-assigned IP, nbd0 capacity + node list, picked root
+partition, and each mount step all show up in the boot log and
+in `dmesg` post-pivot. Kept in place -- these lines are cheap and
+the operator debug value is high.
+
+### Known upstream issue (not fixed here)
+
+The nosi disk images published as OCI artifacts under
+`ghcr.io/safl/nosi/*` are gzip-compressed but named `*.img`.
+withcache stores the bytes as fetched and nbdmux's warmer copies
+those bytes into `<images-dir>/<name>.img` unchanged, so the NBD
+export is a gzip stream, not a mountable disk. Track this in
+nbdmux (the warmer is the natural decompress point) or in nosi's
+publish pipeline (ship pre-decompressed `.img`). Operator
+workaround for now: `gunzip -kc <name>.img.gz > <name>.img.new`,
+swap, `systemctl restart nbdmux.service`.
+
 ## [0.74.0] - 2026-07-08
 
 ### Added
