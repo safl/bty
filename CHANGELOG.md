@@ -9,6 +9,60 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.76.0] - 2026-07-09
+
+### Added
+
+Ramboot initrd now sniffs the `nbd_port` from nbdmux's export
+listing and templates it into the iPXE `bty.nbd=tcp://<host>:<port>`
+line. nbdmux 0.8.1 introduced one-nbdkit-per-export with a port per
+instance so per-export filter chains (partition, cow, ...) can
+diverge; bty picks whichever port the export happens to sit on.
+Falls back to 10809 when the field is absent (older nbdmux
+sidecars).
+
+`PublishPort=10809-10819:10809-10819` in the nbdmux Quadlet unit
+so all per-export nbdkit instances (base + 10 headroom) are
+reachable on the host. Small-lab sizing assumption; grows by
+range widening.
+
+### Fixed
+
+Ramboot initramfs driver stopped stacking `losetup --partscan` on
+top of `/dev/nbd0`. That layer existed to sidestep a Linux 6.12
+kernel bug that fails to enumerate partitions on nbd devices; the
+side effect was that every partition (root, /boot, /boot/efi) got
+its own `/dev/loop0pN` node in userspace, and Ubuntu's fstab
+faithfully tried to mount them read-write through nbdkit's cow
+filter, which wedged jbd2 within 120 s on a running boot. Under
+nbdmux 0.8.1's partition-filter mode (server-side partition
+extraction), `/dev/nbd0` IS the root filesystem, mountable
+directly. When the export is a partitioned disk instead, the
+initrd falls back to `partx --add` (userspace BLKPG-based
+partition-node install) before mount, and if that still comes up
+empty, treats `/dev/nbd0` as a raw fs -- no loop stack in either
+branch.
+
+nbd-client now runs with `-persist` so the initramfs client
+supervisor reconnects if Ubuntu's systemd-networkd tears down the
+socket during network re-init. nbdkit's cow overlay is
+per-nbdkit-instance (not per-connection), so a reconnect
+preserves any in-memory writes.
+
+`/etc/fstab` gets rewritten in the overlay upper before pivot to
+strip any `/boot` and `/boot/efi` entries. Ubuntu images list
+those as ext4/vfat mounts by LABEL, which under ramboot don't
+exist as separate devices; skipping them prevents systemd from
+timing out on nonexistent labels.
+
+### Known follow-ups
+
+`v0.75.0.*` boot artifact naming means an operator upgrading from
+v0.75.x to v0.76.0 needs to re-download the ramboot-init images
+(kernel + initrd) with v0.76.0 in the filename. `bty-lab deploy`
+handles this automatically; manual operators can `curl` the new
+files from the GitHub release into `<data_dir>/bty/boot/`.
+
 ## [0.75.0] - 2026-07-09
 
 ### Fixed

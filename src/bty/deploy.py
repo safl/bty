@@ -512,7 +512,12 @@ Wants=network-online.target
 Image=ghcr.io/safl/nbdmux:latest
 AutoUpdate=registry
 PublishPort=8082:8082
-PublishPort=10809:10809
+# nbdmux v0.8.1+ spawns one nbdkit per export starting at 10809 and
+# incrementing (10810, 10811, ...) so per-export filter chains can
+# diverge (e.g. --filter=partition for partitioned disk images).
+# Publish a range so all per-export nbdkit instances are reachable
+# from the host. Small lab bound to <10 exports at a time.
+PublishPort=10809-10819:10809-10819
 Volume={data_dir_abs}/nbdmux:/data:Z
 Volume={data_dir_abs}/nbdmux/images:/images:Z
 # See note on bty-web's DNS= -- same reason.

@@ -110,8 +110,16 @@ mountroot() {
     # /dev/nbd0 as a single flat device and NEVER exposes the
     # partition device nodes we scan for below. Debian's default is
     # ``max_part=0``.
+    #
+    # Linux keeps module parameters from the FIRST load and silently
+    # ignores params passed to subsequent modprobe calls. If nbd got
+    # pre-loaded during initramfs boot (e.g. by udev on a modalias),
+    # our ``max_part=16`` would drop on the floor and partition
+    # nodes would never appear. Force a clean reload.
+    rmmod nbd 2>/dev/null || true
     modprobe nbd nbds_max=1 max_part=16 || _ramboot_die "modprobe nbd failed"
     modprobe overlay || _ramboot_die "modprobe overlay failed"
+    _ramboot_trace "nbd sysfs max_part=$(cat /sys/module/nbd/parameters/max_part 2>/dev/null || echo '<unreadable>')"
     log_end_msg
 
     # iPXE releases its DHCP lease when it chainloads the kernel, so
@@ -126,9 +134,18 @@ mountroot() {
     log_end_msg
     _ramboot_trace "network up: $(/bin/busybox ip -o -4 addr show 2>/dev/null | /bin/busybox awk '{print $2, $4}' | /bin/busybox tr '\n' ';')"
 
-    _ramboot_trace "nbd-client ${nbd_host}:${nbd_port} -name ${image}"
+    # ``-persist`` keeps nbd-client's supervisor process alive after
+    # the initial attach so it reconnects if the TCP session drops.
+    # Ubuntu's systemd-networkd resets the network stack a few seconds
+    # into userspace boot, which was killing the socket the initramfs
+    # opened and leaving /dev/nbd0 dead. jbd2 on the /boot partition
+    # then queues writes forever (observed 120s hung-task warnings).
+    # With -persist the client reconnects transparently, and
+    # nbdkit's cow filter is per-nbdkit-instance not per-connection,
+    # so the writable overlay survives the drop.
+    _ramboot_trace "nbd-client -persist ${nbd_host}:${nbd_port} -name ${image}"
     log_begin_msg "ramboot: nbd-client ${nbd_host}:${nbd_port} -name ${image}"
-    if ! nbd-client "$nbd_host" "$nbd_port" -name "$image" /dev/nbd0; then
+    if ! nbd-client -persist "$nbd_host" "$nbd_port" -name "$image" /dev/nbd0; then
         _post_status "ramboot.nbd_connect_failed"
         _ramboot_die "nbd-client failed to connect to ${nbd_host}:${nbd_port}"
     fi
@@ -150,26 +167,47 @@ mountroot() {
     _ramboot_trace "nbd0 capacity ready after ${i} tick(s): ${nbd0_size:-0} bytes"
 
     udevadm settle --timeout=10 || true
-    /bin/busybox partprobe /dev/nbd0 2>/dev/null || true
+    /bin/busybox blockdev --rereadpt /dev/nbd0 2>/dev/null || true
     udevadm settle --timeout=10 || true
-    _ramboot_trace "nbd0 nodes: $(/bin/busybox ls -1 /dev/nbd0* 2>/dev/null | /bin/busybox tr '\n' ' ')"
 
-    # Pick root partition: explicit override > largest partition >
-    # whole /dev/nbd0 (filesystem-only images, no partition table).
+    # First try the kernel's own async partition scan. On Linux 6.12
+    # with this nbd driver it consistently returns no partition nodes
+    # for GPT disks (BLKRRPART returns 0 but the scanner gives up
+    # somewhere between reading LBA 0 and validating the GPT header
+    # on LBA 1). Poll briefly so we don't over-wait if the answer is
+    # "not going to happen".
+    i=0
+    while [ "$i" -lt 20 ]; do
+        [ -b /dev/nbd0p1 ] && break
+        /bin/busybox sleep 0.1
+        i=$((i + 1))
+    done
+    if [ ! -b /dev/nbd0p1 ]; then
+        # Kernel didn't produce partition nodes. Use partx from
+        # userspace: it reads the partition table itself (via
+        # libblkid) and installs each partition on the disk via
+        # BLKPG_ADD_PARTITION ioctls, bypassing the in-kernel
+        # scanner. Same end state (``/dev/nbd0pN`` nodes appear
+        # for udev to notice) without a loop-device wrapper.
+        _px_out="$(/usr/bin/partx --add --verbose /dev/nbd0 2>&1)"; _px_rc=$?
+        _ramboot_trace "partx --add rc=${_px_rc} out='${_px_out}'"
+        udevadm settle --timeout=10 || true
+    fi
+    _ramboot_trace "nbd0 nodes after scan: $(/bin/busybox ls -1 /dev/nbd0* 2>/dev/null | /bin/busybox tr '\n' ' ')"
+
     if [ -n "$root_part_override" ]; then
         root_part="$root_part_override"
-    else
+    elif [ -b /dev/nbd0p1 ]; then
+        # Native partition scan worked -- pick the largest partition.
         root_part="$(
             /bin/busybox find /dev -maxdepth 1 -name 'nbd0p*' -print0 \
             | xargs -0 -I{} /bin/busybox sh -c 'echo "$(blockdev --getsize64 "$1") $1"' _ {} \
             | sort -n | tail -1 | cut -d' ' -f2
         )"
-        # No partition nodes at all -- the export is a raw filesystem
-        # (nosi bakes ext4 blobs, not disk images with a partition
-        # table). Use the whole nbd0 device as the root.
-        if [ -z "$root_part" ] && [ -e /dev/nbd0 ]; then
-            root_part=/dev/nbd0
-        fi
+    else
+        # No partition table (or scan didn't fire) -- treat the
+        # whole device as a raw filesystem.
+        root_part=/dev/nbd0
     fi
     _ramboot_trace "picked root_part=${root_part:-<none>}"
     if [ -z "$root_part" ] || [ ! -e "$root_part" ]; then
@@ -178,13 +216,26 @@ mountroot() {
     fi
 
     mkdir -p /lower /upper /root
-    _ramboot_trace "mount ro ${root_part} -> /lower"
-    log_begin_msg "ramboot: mounting ${root_part} ro at /lower"
-    if ! mount -o ro "$root_part" /lower; then
+    _ramboot_trace "$(/sbin/blkid -p ${root_part} 2>&1)"
+    # Try common in-kernel filesystems explicitly, then fall back to
+    # auto-detect. modprobe each candidate first because initramfs
+    # kernel modules aren't preloaded and mount(2) with -t auto only
+    # tries filesystems whose modules are already registered.
+    modprobe ext4 2>/dev/null || true
+    modprobe xfs 2>/dev/null || true
+    modprobe btrfs 2>/dev/null || true
+    _mnt_out=""; _mnt_rc=1
+    for fstype in ext4 xfs btrfs auto; do
+        _ramboot_trace "mount -t ${fstype} -o ro ${root_part} -> /lower"
+        _mnt_out="$(mount -t "$fstype" -o ro "$root_part" /lower 2>&1)"; _mnt_rc=$?
+        [ "$_mnt_rc" -eq 0 ] && break
+        _ramboot_trace "  -> rc=${_mnt_rc} out='${_mnt_out}'"
+    done
+    if [ "$_mnt_rc" -ne 0 ]; then
         _post_status "ramboot.mount_root_failed"
-        _ramboot_die "failed to mount ${root_part}"
+        _ramboot_die "failed to mount ${root_part} as ext4/xfs/btrfs/auto"
     fi
-    log_end_msg
+    _ramboot_trace "mounted ${root_part}; ls /lower:  $(/bin/busybox ls /lower 2>&1 | /bin/busybox tr '\n' ' ')"
 
     _ramboot_trace "tmpfs(${overlay_size}) -> /upper"
     log_begin_msg "ramboot: tmpfs(${overlay_size}) at /upper"
@@ -205,6 +256,29 @@ mountroot() {
         _ramboot_die "failed to mount overlayfs at /root"
     fi
     log_end_msg
+
+    # Rewrite the guest's /etc/fstab in the overlay upper before we
+    # hand control back to /init. Cloud disk images (nosi's Ubuntu +
+    # Debian) list /boot and /boot/efi as separate ext4/vfat mounts
+    # off partitions we can only reach through the loop stack over
+    # nbd. Those mounts have NO overlayfs wrapper, so ext4 journal
+    # writes to /boot land straight in nbdkit's cow filter through
+    # loop + nbd, and something in that chain wedges jbd2 within
+    # 120s (observed on GIGABYTE MC12-LE0 booting nosi's
+    # ubuntu-2604-headless). Root is fine because mountroot() above
+    # already wrapped it in overlay + tmpfs.
+    #
+    # Strip /boot and /boot/efi from fstab: the bootloader has
+    # already consumed /boot before we ever ran, and nothing in
+    # userspace needs to write to it. The overlay upper wins over
+    # the lower's fstab because /root is the overlay merge and /init
+    # pivots into that.
+    if [ -e /lower/etc/fstab ]; then
+        mkdir -p /upper/etc
+        /bin/busybox awk '$2 != "/boot" && $2 != "/boot/efi" { print }' \
+            /lower/etc/fstab > /upper/etc/fstab
+        _ramboot_trace "fstab: rewrote /etc/fstab (dropped /boot, /boot/efi) -- $(wc -l < /upper/etc/fstab) lines"
+    fi
 
     _ramboot_trace "mountroot() done -- returning to /init for pivot_root"
     _post_status "ramboot.up"
