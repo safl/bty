@@ -724,6 +724,17 @@ def create_app(
             )
             export_name: str | None = None
             export_nbd_port: int | None = None
+            # ``netboot_ready`` flips True when nbdmux (>=0.9.0) has
+            # extracted the sibling nosi netboot bundle under
+            # ``<artifacts_dir>/<export>/`` and its manifest.json is
+            # on disk. When True the ramboot template points kernel +
+            # initrd at nbdmux's ``/artifacts/<export>/{vmlinuz,initrd}``
+            # so the image boots with its OWN kernel; when False it
+            # falls back to the bty-media-baked ramboot-init pair.
+            # Older nbdmux (<0.9) never populates the field, so
+            # ``.get("netboot_ready", False)`` collapses old and new
+            # daemons into the safe fallback path.
+            export_netboot_ready = False
             if nbdmux_url and ref:
                 for row in _ramboot.exports_by_src(nbdmux_url):
                     if row.get("status") != "ready":
@@ -747,6 +758,7 @@ def create_app(
                         # the fallback keeps working for older sidecars.
                         maybe_port = row.get("nbd_port")
                         export_nbd_port = int(maybe_port) if isinstance(maybe_port, int) else 10809
+                        export_netboot_ready = bool(row.get("netboot_ready"))
                         break
             ramboot_ready = export_name is not None
             if nbdmux_url and ref and ramboot_ready:
@@ -756,6 +768,13 @@ def create_app(
                 parsed = urllib.parse.urlsplit(nbdmux_url)
                 nbd_host = parsed.hostname or host.split(":")[0]
                 nbd_port = export_nbd_port or 10809
+                # ``nbdmux_base`` is the HTTP root iPXE fetches
+                # ``/artifacts/<export>/{vmlinuz,initrd}`` from when
+                # the netboot bundle is present (see the template's
+                # branch on ``netboot_ready``). Same origin as the
+                # control plane URL the operator configured; strip
+                # trailing slash so the template can append cleanly.
+                nbdmux_base = nbdmux_url.rstrip("/")
                 template = jinja.get_template("ipxe_ramboot.j2")
                 rendered = template.render(
                     mac=normalised,
@@ -763,14 +782,18 @@ def create_app(
                     host=host,
                     nbd_host=nbd_host,
                     nbd_port=nbd_port,
+                    nbdmux_base=nbdmux_base,
+                    netboot_ready=export_netboot_ready,
                     image_ref=ref,
                     export_name=export_name,
                     overlay_size=overlay_size,
                     extra_cmdline=extra_cmdline,
                 )
                 offer_kind = "ramboot"
+                kernel_source = "image-native" if export_netboot_ready else "bty-media"
                 offer_summary = (
-                    f"{normalised} offered ramboot via nbd://{nbd_host}:{nbd_port}/{export_name}"
+                    f"{normalised} offered ramboot via nbd://{nbd_host}:{nbd_port}/{export_name} "
+                    f"({kernel_source} kernel)"
                 )
                 offer_details = {
                     "offer": "ramboot",
@@ -778,6 +801,7 @@ def create_app(
                     "image_ref": ref,
                     "export_name": export_name,
                     "overlay_size": overlay_size,
+                    "kernel_source": kernel_source,
                 }
             else:
                 template = jinja.get_template("ipxe_tui.j2")

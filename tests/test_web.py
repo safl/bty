@@ -1221,14 +1221,24 @@ def test_pxe_sanboot_mode_returns_sanboot_template(app_client: TestClient) -> No
 
 
 def _mock_nbdmux_ready(
-    monkeypatch: pytest.MonkeyPatch, ref: str, *, src_url: str | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    ref: str,
+    *,
+    src_url: str | None = None,
+    netboot_ready: bool = False,
 ) -> None:
     """Replace ``nbdmux.client.list_exports`` with a stub that returns
     a ready export. Since nbdmux PR #33 the export is keyed on the
     URL basename + ``src_url``, so the stub returns both fields.
     Callers that seed a matching catalog entry with a matching src
     let bty look the export up by src_url; callers that don't
-    fall back to the legacy name==ref match."""
+    fall back to the legacy name==ref match.
+
+    ``netboot_ready`` flips True when nbdmux (>=0.9.0) has extracted
+    the sibling nosi netboot bundle -- bty's ramboot template
+    branches on this field to point kernel + initrd at nbdmux's
+    ``/artifacts/<export>/{vmlinuz,initrd}`` (image-native kernel)
+    versus the bty-media-baked ramboot-init pair (fallback)."""
     from nbdmux import client as nbdmux_client
 
     def _fake(server: str, timeout: float = 2.0) -> list[dict[str, object]]:
@@ -1238,6 +1248,7 @@ def _mock_nbdmux_ready(
                 "name": ref,
                 "status": "ready",
                 "src_url": src_url or "",
+                "netboot_ready": netboot_ready,
             }
         ]
 
@@ -1272,6 +1283,43 @@ def test_pxe_ramboot_emits_ramboot_template_when_configured(
     assert "bty-ramboot-init-x86_64-v" in body
     assert "bty.server=" in body  # ramboot template does carry server
     assert "boot=live" not in body
+
+
+def test_pxe_ramboot_uses_image_native_kernel_when_netboot_ready(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When nbdmux (>=0.9.0) reports ``netboot_ready=True`` for the
+    matched export -- meaning the sibling nosi netboot bundle has
+    been extracted under nbdmux's artifacts dir -- the ramboot
+    template points kernel + initrd at nbdmux's
+    ``/artifacts/<export>/{vmlinuz,initrd}`` so the image boots
+    with its OWN kernel rather than bty-media's."""
+    monkeypatch.setenv("BTY_NBDMUX_URL", "http://nbdmux.invalid:8082")
+    ref = "a" * 64
+    _mock_nbdmux_ready(monkeypatch, ref, netboot_ready=True)
+    app_client.put(
+        "/machines/aa:bb:cc:dd:ee:ab",
+        json={
+            "boot_mode": "ramboot",
+            "bty_image_ref": ref,
+        },
+        cookies=AUTH,
+    )
+    r = app_client.get("/pxe/aa:bb:cc:dd:ee:ab")
+    assert r.status_code == 200
+    body = r.text
+    # ``nbdmux-base`` is declared as an iPXE variable at the top of
+    # the script and referenced with ``${nbdmux-base}`` in the kernel
+    # + initrd lines (iPXE substitutes at boot time, not render time).
+    assert "set nbdmux-base http://nbdmux.invalid:8082" in body
+    assert f"${{nbdmux-base}}/artifacts/{ref}/vmlinuz" in body
+    assert f"${{nbdmux-base}}/artifacts/{ref}/initrd" in body
+    # bty-media kernel URL must NOT appear in this variant.
+    assert "bty-ramboot-init-x86_64-v" not in body
+    # bty.* params are shared between both paths and still expected.
+    assert "boot=ramboot" in body
+    assert "bty.nbd=tcp://nbdmux.invalid:10809" in body
+    assert "bty.image=" + ref in body
 
 
 def test_ramboot_bind_rejected_when_ref_not_in_nbdmux(

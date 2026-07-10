@@ -1,6 +1,6 @@
 [project]
 name = "bty-lab"
-version = "0.76.0"
+version = "0.77.0"
 description = "Flash operating system images onto target disks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,20 +21,26 @@ dependencies = [
     # source of truth for the image catalog. bty consumes the catalog
     # through ``withcache.client.list_catalog`` / ``add_catalog_entry``
     # and calls ``withcache.oras`` directly for catalog-add-time digest
-    # resolution. Floor pinned at 0.13.0 -- the events log landed
-    # there (audit trail on catalog / download / miss / settings +
-    # /ui/events + Health tripwire for unacknowledged failures).
-    # Ceiling below 0.14 so a major bump can't slip in.
+    # resolution. Floor unchanged at 0.13.1 -- bty's own code does not
+    # touch the new ``netboot_ref`` catalog field (0.13.2). That field
+    # flows through withcache as a passthrough entry key that nbdmux
+    # (>=0.9.0) consumes at warm time to fetch the sibling netboot
+    # bundle. A trio deploy that wants image-native ramboot kernels
+    # needs withcache 0.13.2 on the withcache side, but bty itself
+    # keeps its floor at 0.13.1 so the constraint can be satisfied
+    # without waiting on the coordinated withcache release. Ceiling
+    # below 0.14 so a major bump can't slip in.
     "withcache>=0.13.1,<0.14",
     # ``nbdmux`` is the HTTP-controlled NBD-export multiplexer that
     # serves catalog images over the network for ``boot_mode=ramboot``.
     # bty validates readiness via ``nbdmux.client.list_exports`` at
-    # PXE chain time and at machine-binding time. Floor pinned at
-    # 0.7.0 -- since that release nbdmux ships the events log
-    # matching withcache's shape (audit trail on export lifecycle
-    # + /ui/events). Ceiling below 0.8 so a major bump surfaces on
-    # floor lift.
-    "nbdmux>=0.7.0,<0.8",
+    # PXE chain time and at machine-binding time. Floor unchanged
+    # at 0.7.0 -- older nbdmux (<0.9) simply doesn't populate
+    # ``netboot_ready`` in list_exports, and bty's ``.get(..., False)``
+    # collapses that into the safe bty-media-baked ramboot-init
+    # fallback path. Ceiling stays below 0.10 so the next major
+    # (an eventual 0.10 wire-shape rework) surfaces on floor lift.
+    "nbdmux>=0.7.0,<0.10",
 ]
 
 [project.optional-dependencies]
