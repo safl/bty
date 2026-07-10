@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "bty-lab"
-version = "0.76.0"
+version = "0.77.0"
 source = { editable = "." }
 dependencies = [
     { name = "nbdmux" },
@@ -84,7 +84,7 @@ requires-dist = [
     { name = "itsdangerous", marker = "extra == 'web'", specifier = ">=2.1" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1" },
-    { name = "nbdmux", specifier = ">=0.7.0,<0.8" },
+    { name = "nbdmux", specifier = ">=0.7.0,<0.10" },
     { name = "python-multipart", marker = "extra == 'all'", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.9" },
     { name = "rich", marker = "extra == 'all'", specifier = ">=13" },

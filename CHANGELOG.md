@@ -9,6 +9,34 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.77.0] - 2026-07-10
+
+### Added
+
+Ramboot iPXE template now branches on `netboot_ready` from nbdmux's
+export listing. When True, kernel + initrd URLs point at nbdmux's
+`GET /artifacts/<export>/{vmlinuz,initrd}` so the image boots with
+its OWN kernel (extracted by nbdmux at warm time from the sibling
+nosi netboot bundle); `uname -r` inside the rambooted guest now
+matches `/lib/modules/` on the same rootfs and drivers baked into
+the image's kernel package resolve. When False (older nbdmux, no
+sibling bundle staged, third-party image), the chain still falls
+back to the bty-media-baked ramboot-init pair -- no behavioural
+regression for existing catalogs.
+
+Requires nbdmux >=0.9.0 + withcache >=0.13.2 for the trio to serve
+image-native kernels end-to-end. The dep floors move on bty's side
+only for nbdmux ceiling (opened to <0.10 so 0.9.0 satisfies); the
+withcache floor stays at 0.13.1 because bty itself does not touch
+the new `netboot_ref` catalog field (it flows through withcache to
+nbdmux as an opaque passthrough).
+
+### Changed
+
+Ramboot offer's timeline event now carries `kernel_source` =
+`image-native` or `bty-media` so an operator scanning /ui/events
+can tell which of the two paths a given boot took.
+
 ## [0.76.0] - 2026-07-09
 
 ### Added
