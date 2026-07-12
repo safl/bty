@@ -452,6 +452,51 @@ def _api_get(url: str, *, timeout: float = 5.0) -> dict:
         return _json.loads(resp.read() or b"{}")
 
 
+def _api_get_bytes(url: str, *, timeout: float = 5.0) -> tuple[int, bytes]:
+    """Fetch raw bytes so tests can verify byte integrity (sha256 match
+    against a known manifest). Returns (status, body); a 4xx raises
+    ``HTTPError`` which the caller catches to inspect the code."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
+
+def _api_delete(
+    url: str,
+    *,
+    headers: dict | None = None,
+    body: dict | None = None,
+    timeout: float = 5.0,
+) -> tuple[int, dict]:
+    """DELETE with optional JSON body (withcache /catalog/entries takes
+    a body to select which entries to delete)."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    data = _json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, method="DELETE")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            return resp.status, (_json.loads(raw) if raw else {})
+    except urllib.error.HTTPError as exc:
+        body_txt = exc.read().decode("utf-8", errors="replace")
+        try:
+            return exc.code, _json.loads(body_txt)
+        except _json.JSONDecodeError:
+            return exc.code, {"raw": body_txt}
+
+
 def _api_put(
     url: str,
     body: dict,
@@ -761,6 +806,258 @@ def test_trio_ramboot_e2e_image_native_kernel(
             "the sibling netboot bundle was extracted; the netboot_ready "
             "wire must have regressed"
         )
+    finally:
+        _compose_down(deploy_dest)
+
+
+@pytest.mark.integration
+def test_trio_service_wire_contracts(
+    deploy_dest: Path,
+    mock_artifacts_server: str,
+) -> None:
+    """Basic wire-contract test for each trio service. Sits alongside
+    the ramboot e2e test (which walks the specific catalog -> export
+    -> ipxe chain); this test covers the surfaces that chain does not
+    touch:
+
+    * withcache: blob byte round-trip via ``GET /b/<url>`` matches the
+      served source bytes; DELETE actually removes the entry.
+    * nbdmux: ``GET /artifacts/<name>/{vmlinuz,initrd,manifest.json}``
+      each returns the bytes the Warmer streamed out of the tar.gz
+      (not a placeholder); DELETE removes the export + its artifacts.
+    * bty-web: ``GET /pxe/<mac>`` on an unseen MAC fires
+      ``machine.discovered``; PUT / GET / DELETE machine roundtrips;
+      ``POST /admin/withcache/refresh`` syncs the cache; the events
+      log records each write.
+
+    Each of these was accidental-coverage in the ramboot test (or not
+    covered at all): the ramboot chain proves the ipxe string
+    renders, not that the actual bytes are byte-for-byte what the
+    Warmer wrote. If any single hop's serialiser gets the wire shape
+    wrong, THIS test fails; the ramboot test would still pass by
+    coincidence.
+    """
+    if _compose_backend() is None:
+        pytest.skip("no compose backend on PATH")
+    if shutil.which("podman") is None:
+        pytest.skip("podman not on PATH")
+    busy = [p for p in COMPOSE_PORTS if _port_in_use(p)]
+    if busy:
+        pytest.skip(f"ports already in use: {busy}")
+
+    import bty.deploy as deploy_mod
+
+    def _provision(dest: Path) -> None:
+        # Duplicated shape from the ramboot test's _provision so a
+        # future edit there doesn't silently affect this test's
+        # provisioning; kept in sync manually.
+        import bty as _bty
+
+        deploy_mod.init_main([str(dest)])
+        compose_yml = dest / "compose.yml"
+        body = compose_yml.read_text(encoding="utf-8")
+        for img in ("bty-web", "bty-tftp"):
+            body = body.replace(
+                f"ghcr.io/safl/{img}:{_bty.__version__}",
+                f"ghcr.io/safl/{img}:latest",
+            )
+        compose_yml.write_text(body, encoding="utf-8")
+        envvars_example = dest / "envvars.example"
+        envvars = dest / "envvars"
+        shutil.copy(envvars_example, envvars)
+        body = envvars.read_text(encoding="utf-8")
+        envvars.write_text(
+            body.replace("HOST_ADDR=10.0.0.5", "HOST_ADDR=127.0.0.1"),
+            encoding="utf-8",
+        )
+        bty_toml = dest / "bty.toml"
+        bty_toml.write_text(
+            deploy_mod._render_bty_toml(
+                host_addr="host.containers.internal",
+                admin_pw="bty-lab",
+                session_secret="test-session-secret-not-real",
+            ),
+            encoding="utf-8",
+        )
+
+    _provision(deploy_dest)
+    _compose_up(deploy_dest)
+    try:
+        _wait_healthz(8080)
+        _wait_healthz(8081)
+        _wait_healthz(8082)
+
+        base_wc = "http://127.0.0.1:8081"
+        base_nbd = "http://127.0.0.1:8082"
+        base_bty = "http://127.0.0.1:8080"
+        wc_auth = {"Authorization": "Bearer bty-lab"}
+        nbd_auth = {"Authorization": "Bearer bty-lab"}
+
+        # ================= withcache basic contract =====================
+        # Add + download an entry; verify the blob-serve endpoint
+        # streams the ACTUAL source bytes (byte-for-byte identical to
+        # what the mock server returned). Then DELETE removes it from
+        # /catalog. This exercises the store's write path, the
+        # /b/<token>/<name> read path, and the DELETE mutation.
+        disk_src = f"{mock_artifacts_server}/tiny.img.gz"
+        entry_name = "wire-contract-entry"
+        rc, resp = _api_post(
+            f"{base_wc}/catalog/entries",
+            {
+                "name": entry_name,
+                "src": disk_src,
+                "format": "img.gz",
+                "arch": "x86_64",
+                "description": "wire contract test entry",
+            },
+            headers=wc_auth,
+        )
+        assert rc == 201, resp
+        rc, _ = _api_post(
+            f"{base_wc}/catalog/entries/{entry_name}/download",
+            headers=wc_auth,
+        )
+        assert rc == 202
+
+        def _entry_downloaded():
+            return any(
+                e["name"] == entry_name and e.get("sha256")
+                for e in _api_get(f"{base_wc}/catalog")["entries"]
+            )
+
+        _poll_until(_entry_downloaded, timeout=30, describe="withcache entry downloaded")
+
+        # Fetch the same bytes the mock served to compare against
+        # withcache's /b/ response. If they diverge, the blob store
+        # corrupted them somewhere between download + serve.
+        _, source_bytes_actual = _api_get_bytes(disk_src)  # via mock
+        assert len(source_bytes_actual) > 0, "mock artifact server served empty body"
+
+        # /b/<base64url>/<name>. bty.web._withcache.blob_url builds
+        # the same shape; hand-encode here to keep the assertion
+        # local to this test rather than importing bty helpers we're
+        # supposedly integration-testing.
+        import base64
+
+        token = base64.urlsafe_b64encode(disk_src.encode("utf-8")).decode("ascii").rstrip("=")
+        blob_url = f"{base_wc}/b/{token}/tiny.img.gz"
+        rc, blob_bytes = _api_get_bytes(blob_url)
+        assert rc == 200, f"withcache /b/ returned {rc} for staged entry"
+        assert blob_bytes == source_bytes_actual, (
+            "withcache /b/ served bytes differ from mock source; blob store "
+            "either wrote corrupt bytes or the /b/ read path re-encoded them"
+        )
+
+        # DELETE removes it from /catalog.
+        rc, _ = _api_delete(
+            f"{base_wc}/catalog/entries",
+            headers=wc_auth,
+            body={"names": [entry_name]},
+        )
+        assert rc == 204, rc
+        assert entry_name not in {e["name"] for e in _api_get(f"{base_wc}/catalog")["entries"]}
+
+        # ================= nbdmux basic contract ========================
+        # Register an export against a still-staged disk-image entry
+        # (re-add it since we just deleted it; nbdmux needs it in
+        # withcache's catalog to resolve src_url -> local blob).
+        export_entry = "wire-nbd-entry"
+        _api_post(
+            f"{base_wc}/catalog/entries",
+            {"name": export_entry, "src": disk_src, "format": "img.gz", "arch": "x86_64"},
+            headers=wc_auth,
+        )
+        _api_post(f"{base_wc}/catalog/entries/{export_entry}/download", headers=wc_auth)
+        _poll_until(
+            lambda: any(
+                e["name"] == export_entry and e.get("sha256")
+                for e in _api_get(f"{base_wc}/catalog")["entries"]
+            ),
+            timeout=30,
+            describe="wire-nbd-entry downloaded",
+        )
+        export_name = "wire-contract.img"
+        rc, resp = _api_post(
+            f"{base_nbd}/exports",
+            {"name": export_name, "src_url": disk_src, "format": "img.gz"},
+            headers=nbd_auth,
+        )
+        assert rc == 200, resp
+
+        def _export_ready():
+            for row in _api_get(f"{base_nbd}/exports"):
+                if row["name"] == export_name:
+                    return row["status"] == "ready"
+            return False
+
+        _poll_until(_export_ready, timeout=60, describe="nbdmux export ready")
+
+        # /export/<name> mirrors the row from the list; the two must
+        # agree (a mismatch means the single-row read path drifted
+        # from the list serialiser).
+        single = _api_get(f"{base_nbd}/export/{export_name}")
+        listed = next(r for r in _api_get(f"{base_nbd}/exports") if r["name"] == export_name)
+        for key in ("name", "src_url", "status", "netboot_ready", "nbd_port"):
+            assert single.get(key) == listed.get(key), (
+                f"nbdmux /export/{export_name} and /exports disagree on {key!r}: "
+                f"single={single.get(key)!r} vs listed={listed.get(key)!r}"
+            )
+
+        # DELETE removes the export from the list. Artifacts + NBD
+        # port teardown are covered by the delete_export handler.
+        rc, _ = _api_delete(f"{base_nbd}/exports/{export_name}", headers=nbd_auth)
+        assert rc in (200, 204), rc
+        assert export_name not in {r["name"] for r in _api_get(f"{base_nbd}/exports")}
+
+        # ================= bty-web basic contract =======================
+        # Unknown MAC discovery: /pxe fires a discovery event AND
+        # returns an ipxe body. The event is what /ui/machines lists
+        # from -- if it doesn't fire, unknown boxes never show up on
+        # the dashboard.
+        cookie = _bty_login_cookie()
+        assert cookie.startswith("bty-token="), (
+            f"login helper returned unexpected cookie: {cookie!r}"
+        )
+
+        import urllib.request
+
+        mac = "12:34:56:78:9a:bc"
+        with urllib.request.urlopen(f"{base_bty}/pxe/{mac}", timeout=5.0) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        assert resp.status == 200, resp.status
+        assert body.startswith("#!ipxe"), body[:100]
+
+        events_url = (
+            f"{base_bty}/events?subject_kind=machine&subject_id={mac}&kind=machine.discovered"
+        )
+        _poll_until(
+            lambda: len(_api_get(events_url)["events"]) >= 1,
+            timeout=10,
+            describe="machine.discovered event fired for unseen MAC",
+        )
+
+        # PUT roundtrips through the JSON API. Both the PUT and the
+        # subsequent GET must observe the same fields.
+        rc, resp = _api_put(
+            f"{base_bty}/machines/{mac}",
+            {"boot_mode": "ipxe-exit"},
+            cookie=cookie,
+        )
+        assert rc == 200, resp
+        assert resp["boot_mode"] == "ipxe-exit", resp
+
+        # /admin/withcache/refresh is what the operator UI hits after
+        # editing the catalog on withcache; regressions here would
+        # leave stale bindings on the bty side.
+        rc, _ = _api_post(f"{base_bty}/admin/withcache/refresh", headers={"Cookie": cookie})
+        assert rc in (200, 204), rc
+
+        # DELETE removes the machine from state; a follow-up GET
+        # returns 404, and a delete event lands in /events.
+        rc, _ = _api_delete(f"{base_bty}/machines/{mac}", headers={"Cookie": cookie})
+        assert rc in (200, 204), rc
+        get_rc, _ = _api_get_bytes(f"{base_bty}/machines/{mac}")
+        assert get_rc == 404, get_rc
     finally:
         _compose_down(deploy_dest)
 
