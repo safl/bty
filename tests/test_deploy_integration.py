@@ -928,9 +928,14 @@ def test_trio_service_wire_contracts(
         _poll_until(_entry_downloaded, timeout=30, describe="withcache entry downloaded")
 
         # Fetch the same bytes the mock served to compare against
-        # withcache's /b/ response. If they diverge, the blob store
-        # corrupted them somewhere between download + serve.
-        _, source_bytes_actual = _api_get_bytes(disk_src)  # via mock
+        # withcache's /b/ response. The mock URL uses
+        # ``host.containers.internal`` so the sidecars can reach it;
+        # rewrite to ``127.0.0.1`` for this host-side fetch (the
+        # fixture binds on 0.0.0.0 so both routes see the same
+        # bytes). If they diverge, the blob store corrupted them
+        # somewhere between download + serve.
+        mock_host_url = disk_src.replace("host.containers.internal", "127.0.0.1")
+        _, source_bytes_actual = _api_get_bytes(mock_host_url)
         assert len(source_bytes_actual) > 0, "mock artifact server served empty body"
 
         # /b/<base64url>/<name>. bty.web._withcache.blob_url builds
