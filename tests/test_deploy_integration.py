@@ -483,49 +483,19 @@ def _bty_login_cookie() -> str:
     """Login to bty-web with the deploy's default password and return the
     ``Cookie:`` header value. The deploy's envvars.example ships with
     ``BTY_ADMIN_PASSWORD=bty-lab`` and the test's _provision copies it
-    verbatim.
-
-    ``POST /ui/login`` responds with a 303 redirect whose ``Set-Cookie``
-    carries the ``bty-token`` session cookie. urllib's default
-    ``HTTPRedirectHandler`` follows the 303 to ``/ui/`` and reports
-    the second response's headers, which have no cookie -- callers
-    then send an empty ``Cookie:`` header and every subsequent request
-    401s. Intercept the 303 so we can read Set-Cookie off it.
-    """
-    import urllib.error
+    verbatim."""
     import urllib.request
 
-    class _CaptureRedirect(urllib.request.HTTPRedirectHandler):
-        def http_error_303(  # type: ignore[override]
-            self,
-            req: urllib.request.Request,
-            fp,
-            code: int,
-            msg: str,
-            headers,
-        ):
-            raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
-
-    opener = urllib.request.build_opener(_CaptureRedirect)
     req = urllib.request.Request(
         "http://127.0.0.1:8080/ui/login",
         data=b"password=bty-lab",
         method="POST",
     )
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
-    try:
-        opener.open(req, timeout=5.0)
-    except urllib.error.HTTPError as exc:
-        cookies = exc.headers.get_all("Set-Cookie") or []
-        # Pick the bty-token cookie value (form: ``name=value; path=...``);
-        # a bare join would drag path / Max-Age attributes into the
-        # Cookie: header, which bty-web then rejects.
-        for raw in cookies:
-            head = raw.split(";", 1)[0].strip()
-            if head.startswith("bty-token="):
-                return head
-        return ""
-    return ""
+    with urllib.request.urlopen(req, timeout=5.0) as resp:
+        # SessionMiddleware sets a "session" cookie. Bty's front-door
+        # UI uses that.
+        return resp.headers.get("Set-Cookie", "")
 
 
 def _poll_until(
