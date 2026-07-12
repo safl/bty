@@ -604,6 +604,28 @@ def test_trio_ramboot_e2e_image_native_kernel(
             body.replace("HOST_ADDR=10.0.0.5", "HOST_ADDR=127.0.0.1"),
             encoding="utf-8",
         )
+        # ``init_main`` writes envvars.example + compose.yml + README.md
+        # but does NOT render bty.toml (that is ``deploy_main``'s job).
+        # The compose bind-mount ``./bty.toml:/etc/bty/bty.toml`` then
+        # lands on an empty file inside the container and
+        # ``resolve_nbdmux_url`` returns ``None`` -- the ramboot binding
+        # gate rejects with 422 "nbdmux URL not configured". The
+        # lifecycle test never exercises that path so the gap stayed
+        # invisible.
+        #
+        # Point the sidecar URLs at ``host.containers.internal:<port>``:
+        # the compose stack publishes 8081/8082 on the host, and
+        # bty-web -> host round-trip via that DNS name reaches nbdmux
+        # + withcache regardless of the compose network shape.
+        bty_toml = dest / "bty.toml"
+        bty_toml.write_text(
+            deploy_mod._render_bty_toml(
+                host_addr="host.containers.internal",
+                admin_pw="bty-lab",
+                session_secret="test-session-secret-not-real",
+            ),
+            encoding="utf-8",
+        )
 
     _provision(deploy_dest)
     _compose_up(deploy_dest)
