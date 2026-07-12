@@ -953,11 +953,14 @@ def test_trio_service_wire_contracts(
             "either wrote corrupt bytes or the /b/ read path re-encoded them"
         )
 
-        # DELETE removes it from /catalog.
+        # DELETE removes it from /catalog. The API takes ``?name=`` as
+        # a query param (URL-safe -- avoids path-encoding TOML entry
+        # names). A JSON body would come back 400.
+        import urllib.parse
+
         rc, _ = _api_delete(
-            f"{base_wc}/catalog/entries",
+            f"{base_wc}/catalog/entries?name={urllib.parse.quote(entry_name)}",
             headers=wc_auth,
-            body={"names": [entry_name]},
         )
         assert rc == 204, rc
         assert entry_name not in {e["name"] for e in _api_get(f"{base_wc}/catalog")["entries"]}
