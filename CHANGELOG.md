@@ -9,6 +9,26 @@ gates that landed in CI.
 Per-release commit history lives in `git log`; this file captures the
 operator-facing summary.
 
+## [0.77.2] - 2026-07-12
+
+### Fixed
+
+The machine-detail image picker listed every entry in the
+withcache catalog, including the netboot-bundle sidecars
+(`format=tar.gz`) that nbdmux unpacks at warm time to obtain
+vmlinuz + initrd. Those aren't bindable root disks: for
+`bty-flash-*` the flash pipeline explicitly rejects tarballs;
+for `ramboot` no nbdmux export exists at the sidecar's src so
+binding falls through to the ipxe_tui recovery chain. On a
+fresh nosi catalog with one bindable image and two sibling
+bundles the picker rendered three options for one usable
+choice.
+
+The picker now filters to `bty.images.BINDABLE_FORMATS` (the
+same set the flash pipeline honours), so only real disk-image
+formats reach the operator. Sidecar entries remain visible on
+withcache's own `/ui/catalog` page for operator awareness.
+
 ## [0.77.1] - 2026-07-11
 
 ### Fixed
