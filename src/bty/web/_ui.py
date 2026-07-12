@@ -587,6 +587,15 @@ def register_ui_routes(
             for row in _ramboot.exports_by_src(nbdmux_url)
             if row.get("status") == "ready" and row.get("src_url")
         }
+        # Withcache also carries netboot bundles (``format=tar.gz``) as
+        # sidecar entries whose bytes nbdmux unpacks at warm time --
+        # they are NOT bindable disks. Filter to ``BINDABLE_FORMATS``
+        # so a sidecar never lands in the picker (an operator picking
+        # one would land at the flash pipeline's "tarballs are not
+        # supported" reject; on ramboot mode the option would fall
+        # through to the ipxe_tui recovery chain because no nbdmux
+        # export exists for a tar.gz src). Sidecar visibility stays
+        # on withcache's own /ui/catalog page for operator awareness.
         catalog_options = [
             {
                 "bty_image_ref": e.get("bty_image_ref"),
@@ -604,6 +613,7 @@ def register_ui_routes(
                 request.app.state.withcache_catalog.entries,
                 key=lambda x: (x.get("name") or "").lower(),
             )
+            if e.get("format") in bty_images.BINDABLE_FORMATS
         ]
         # Reads ``?error=<msg>`` so the upsert form's bounce-on-
         # validation-failure renders a flash banner. Same shape as

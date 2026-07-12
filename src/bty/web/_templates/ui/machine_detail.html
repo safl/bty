@@ -250,13 +250,17 @@
                     <option value="">- none (discovered, will boot from local disk) -</option>
                     {% for img in images %}
                     {# img is a WithcacheCatalog entry: ``bty_image_ref``
-                       is the option value. Since withcache v0.11.0
-                       every entry in the catalog is downloaded by
-                       definition, so every row here is bindable for
-                       flash policies. Ramboot needs a matching ready
-                       nbdmux export -- ``ramboot_ready`` reflects
-                       that. The inline script below disables options
-                       whose ``ramboot_ready`` is false when
+                       is the option value. The server filters to
+                       ``BINDABLE_FORMATS`` in ``_ui.py`` so netboot-
+                       bundle sidecars (``tar.gz`` -- unpacked by
+                       nbdmux at warm time, not bindable as a root
+                       disk) never appear here. Every remaining row
+                       is downloaded on withcache (v0.11.0+ semantics)
+                       and thus bindable for flash policies. Ramboot
+                       additionally needs a matching ready nbdmux
+                       export -- ``ramboot_ready`` reflects that. The
+                       inline script below disables options whose
+                       ``ramboot_ready`` is false when
                        boot_mode=ramboot, so the operator does not
                        accidentally pick an image that would fall
                        through to the ipxe-tui recovery chain. #}

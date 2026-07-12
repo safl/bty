@@ -1059,6 +1059,62 @@ def test_ui_machine_upsert_persists_boot_mode_flash(client: TestClient) -> None:
     assert api.json()["target_disk_serial"] == "ATA-WDC-123456"
 
 
+def test_ui_machine_detail_image_picker_excludes_netboot_sidecars(
+    client: TestClient,
+) -> None:
+    """Withcache also carries netboot-bundle entries (``format=tar.gz``)
+    that nbdmux unpacks at warm time to obtain vmlinuz + initrd. Those
+    are sidecars for another consumer, not bindable root disks -- an
+    operator who picked one for boot_mode=bty-flash-* would land on
+    the flash pipeline's "tarballs not supported" reject, and for
+    boot_mode=ramboot no export exists at that src so it would fall
+    through to ipxe_tui. The picker must filter to bindable disk
+    formats (``BINDABLE_FORMATS`` from ``bty.images``). Regression
+    guard: before the filter, the machine-edit page for a fresh nosi
+    catalog showed three <option> rows per pairing (disk + two
+    tar.gz sidecars) which the operator saw as noise.
+    """
+    from bty.catalog import image_ref_for_src
+
+    _login(client)
+    client.put(
+        "/machines/aa:bb:cc:dd:ee:22",
+        json={
+            "bty_image_ref": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+        cookies=AUTH,
+    )
+    disk_src = "oras://ghcr.io/safl/nosi/ubuntu-2604-headless:2026.W28"
+    bundle_src = "oras://ghcr.io/safl/nosi/ubuntu-2604-headless-netboot:2026.W28"
+    disk_ref = image_ref_for_src(disk_src)
+    bundle_ref = image_ref_for_src(bundle_src)
+    existing = list(client.app.state.withcache_catalog.entries)  # type: ignore[attr-defined]
+    existing.extend(
+        [
+            {
+                "name": "nosi ubuntu-2604-headless (x86_64, 2026.W28)",
+                "src": disk_src,
+                "format": "img.gz",
+                "downloaded_at": "2026-07-06T00:00:00Z",
+            },
+            {
+                "name": "nosi ubuntu-2604-headless netboot bundle (x86_64, 2026.W28)",
+                "src": bundle_src,
+                "format": "tar.gz",
+                "downloaded_at": "2026-07-06T00:00:00Z",
+            },
+        ]
+    )
+    client.app.state.withcache_catalog._seed_for_tests(existing)  # type: ignore[attr-defined]
+
+    body = client.get("/ui/machines/aa:bb:cc:dd:ee:22", cookies=AUTH).text
+    # The disk-image entry renders as an option.
+    assert f'value="{disk_ref}"' in body
+    # The tar.gz sidecar does NOT.
+    assert f'value="{bundle_ref}"' not in body
+    assert "netboot bundle" not in body
+
+
 def test_ui_machine_detail_renders_disk_inventory_dropdown(client: TestClient) -> None:
     """When the machine has ``known_disks`` populated (``bty`` has
     reported in), /ui/machines/{mac} shows a populated <select>
