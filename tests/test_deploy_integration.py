@@ -541,7 +541,11 @@ def test_trio_ramboot_e2e_image_native_kernel(
         pytest.skip("no compose backend on PATH")
     if shutil.which("podman") is None:
         pytest.skip("podman not on PATH")
-    busy = [p for p in (*COMPOSE_PORTS, E2E_MOCK_PORT) if _port_in_use(p)]
+    # ``E2E_MOCK_PORT`` is bound by the ``mock_artifacts_server``
+    # fixture BEFORE this body runs; probing it here always sees our
+    # own listener and self-skips. Only guard the compose-owned ports,
+    # which the fixture never touches.
+    busy = [p for p in COMPOSE_PORTS if _port_in_use(p)]
     if busy:
         pytest.skip(f"ports already in use: {busy}")
 
