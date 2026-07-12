@@ -444,23 +444,31 @@ def _api_post(
             return exc.code, {"raw": body_txt}
 
 
-def _api_get(url: str, *, timeout: float = 5.0) -> dict:
+def _api_get(url: str, *, headers: dict | None = None, timeout: float = 5.0) -> dict:
     import json as _json
     import urllib.request
 
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    req = urllib.request.Request(url, method="GET")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return _json.loads(resp.read() or b"{}")
 
 
-def _api_get_bytes(url: str, *, timeout: float = 5.0) -> tuple[int, bytes]:
+def _api_get_bytes(
+    url: str, *, headers: dict | None = None, timeout: float = 5.0
+) -> tuple[int, bytes]:
     """Fetch raw bytes so tests can verify byte integrity (sha256 match
     against a known manifest). Returns (status, body); a 4xx raises
     ``HTTPError`` which the caller catches to inspect the code."""
     import urllib.error
     import urllib.request
 
+    req = urllib.request.Request(url, method="GET")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
@@ -1038,8 +1046,11 @@ def test_trio_service_wire_contracts(
         events_url = (
             f"{base_bty}/events?subject_kind=machine&subject_id={mac}&kind=machine.discovered"
         )
+        # ``/events`` is session-auth-gated (bty-web mirrors the /ui/
+        # auth: an operator-only telemetry surface). Pass the login
+        # cookie so the poll can read the timeline.
         _poll_until(
-            lambda: len(_api_get(events_url)["events"]) >= 1,
+            lambda: len(_api_get(events_url, headers={"Cookie": cookie})["events"]) >= 1,
             timeout=10,
             describe="machine.discovered event fired for unseen MAC",
         )
@@ -1064,7 +1075,10 @@ def test_trio_service_wire_contracts(
         # returns 404, and a delete event lands in /events.
         rc, _ = _api_delete(f"{base_bty}/machines/{mac}", headers={"Cookie": cookie})
         assert rc in (200, 204), rc
-        get_rc, _ = _api_get_bytes(f"{base_bty}/machines/{mac}")
+        get_rc, _ = _api_get_bytes(
+            f"{base_bty}/machines/{mac}",
+            headers={"Cookie": cookie},
+        )
         assert get_rc == 404, get_rc
     finally:
         _compose_down(deploy_dest)
