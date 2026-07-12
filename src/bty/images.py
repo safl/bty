@@ -133,6 +133,17 @@ def default_image_root() -> Path:
     return Path(env) if env else DEFAULT_IMAGE_ROOT
 
 
+# Formats bty can flash or serve as an NBD-backed root disk. Everything
+# in ``_EXTENSIONS`` is a raw-disk container the flash pipeline knows
+# how to stream through ``dd``. Not a superset: entries the catalog
+# ships as sidecars for another consumer (e.g. ``tar.gz`` netboot
+# bundles, which nbdmux unpacks at warm time to obtain vmlinuz +
+# initrd) are deliberately absent so the operator picker + machine-
+# binding gate exclude them. Kept in one place so a new bindable
+# format is enabled by adding it to ``_EXTENSIONS`` alone.
+BINDABLE_FORMATS: frozenset[str] = frozenset(fmt for _, fmt in _EXTENSIONS)
+
+
 def detect_format(path: Path) -> str | None:
     """Return the image format identifier for ``path``, or ``None``."""
     name = path.name.lower()
